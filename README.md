@@ -74,7 +74,7 @@ The script auto-detects your display server and compositor via `$XDG_SESSION_TYP
 
 | Session | Monitor detection | Display switching | Notes |
 |---------|------------------|------------------|-------|
-| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | Fully supported |
+| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | Untested |
 | **Hyprland** | `hyprctl monitors` | `hyprctl keyword monitor` (resolution, rate, position, transform) | Fully supported |
 | **Sway** / **Niri** (future) | - | - | Easy to add when requested |
 | **Other Wayland** | Manual input only | None | Fallback, no auto-detection |
