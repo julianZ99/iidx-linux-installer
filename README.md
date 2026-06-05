@@ -22,21 +22,21 @@ Interactive setup wizard - no arguments required. All values can be entered thro
 
 ### Options
 
-| Argument | Description |
-|----------|-------------|
-| `--style <NUM>` | Game version number (e.g. `32`) |
-| `--dump <PATH>` | Path to game dump directory (must contain a `contents/` folder) |
-| `--monitor <n>` | Primary monitor name (e.g. `DP-1`). Game runs on this display. Implicitly enables monitor management. |
-| `--secondary-monitor <n>` | Optional. Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay; all monitors fully restored after (position, resolution, rate, rotation). Implicitly enables monitor management. |
-| `--rate <HZ>` | Game refresh rate - only used when monitor management is enabled. Default: `120`; use `60` for some dumps/cabinets. |
-| `--proton-ver <VER>` | Proton-GE version (default: `8.32`) |
-| `--bmsound-ver <VER>` | bmsound_wine version (default: latest) |
-| `--spice-date <DATE>` | spicetools date (default: latest) |
-| `--steam-home <PATH>` | Steam root path (auto-detected) |
-| `--asphyxia-url <URL>` | Asphyxia server URL |
-| `--asphyxia-pcbid <ID>` | Cabinet PCBID |
-| `--uninstall` | Remove all installed files and optionally revert system changes (packages, groups, services) |
-| `--yes` / `-y` | Non-interactive mode |
+| Argument | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `--style <NUM>` | With `-y` | — | Game version number (e.g. `32`) |
+| `--dump <PATH>` | With `-y` | — | Path to game dump directory (must contain a `contents/` folder) |
+| `--monitor <n>` | No | (prompted) | Primary monitor name (e.g. `DP-1`). Implicitly enables monitor management. |
+| `--secondary-monitor <n>` | No | (prompted) | Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay. Implicitly enables monitor management. |
+| `--rate <HZ>` | No | `120` | Monitor target rate. Only used when monitor management is enabled. |
+| `--proton-ver <VER>` | No | `8.32` | Proton-GE version |
+| `--bmsound-ver <VER>` | No | latest | bmsound_wine version |
+| `--spice-date <DATE>` | No | latest | spicetools release date |
+| `--steam-home <PATH>` | No | auto-detected | Steam root path |
+| `--asphyxia-url <URL>` | No | `http://127.0.0.1:1108/` | Asphyxia server URL |
+| `--asphyxia-pcbid <ID>` | No | `00010203040506070809` | Cabinet PCBID |
+| `--uninstall` | No | — | Remove all installed files and optionally revert system changes |
+| `--yes` / `-y` | No | — | Non-interactive mode. Requires `--style` and `--dump`. All other prompts use their default values. |
 
 ### Examples
 
@@ -77,7 +77,7 @@ If a secondary monitor is configured, it is also disabled during gameplay and re
 3. Installs **spicetools** (launcher and I/O layer)
 4. Sets up symlinks, compatdata and Steam structure
 5. Creates `.desktop` launcher entries; optionally with full monitor state save/restore via a helper script
-6. Optional **Asphyxia** network configuration (e.g. `https://asphyxia-core.app`)
+6. **Asphyxia** network configuration (e.g. `https://asphyxia-core.app`)
 
 ## Session support
 
@@ -102,6 +102,10 @@ The installer can configure the game to connect to an Asphyxia server:
 - `--asphyxia-pcbid <ID>` - cabinet ID for identification
 
 You can also enter these values interactively during the **Network** page of the wizard.
+
+With `--yes` (non-interactive), Asphyxia will be configured using the provided flags or the defaults above.
+
+If you want to change the server or cabinet ID after installation, edit the `"network"` section in `contents/prop/linux.json` inside your dump directory.
 
 Refer to the [Asphyxia documentation](https://github.com/asphyxia-core/asphyxia-core.github.io) for setup instructions.
 
