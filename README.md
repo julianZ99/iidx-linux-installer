@@ -27,8 +27,8 @@ Interactive setup wizard - no arguments required. All values can be entered thro
 | `--style <NUM>` | Game version number (e.g. `32`) |
 | `--dump <PATH>` | Path to game dump directory (must contain a `contents/` folder) |
 | `--monitor <n>` | Primary monitor name (e.g. `DP-1`). Game runs on this display. |
-| `--secondary-monitor <n>` | Optional. Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay, all monitors fully restored after (position, resolution, rate, rotation). |
-| `--rate <HZ>` | Game refresh rate (default: `120`) |
+| `--secondary-monitor <n>` | Optional. Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay; all monitors fully restored after (position, resolution, rate, rotation). |
+| `--rate <HZ>` | Game refresh rate (default: `120`). The launcher auto-switches the primary monitor to this rate on every launch and restores it after. |
 | `--proton-ver <VER>` | Proton-GE version (default: `8.32`) |
 | `--bmsound-ver <VER>` | bmsound_wine version (default: latest) |
 | `--spice-date <DATE>` | spicetools date (default: latest) |
@@ -53,10 +53,16 @@ After installation, launch the game from your application launcher or desktop:
 - Search for **Beatmania IIDX <version>** in your app menu
 - Or use the `.desktop` file created at `~/.local/share/applications/iidx<version>.desktop`
 
-The `.desktop` entry handles display management:
+The `.desktop` entry uses a helper script (`iidx-mon-state.sh`) that saves/restores all monitor state on every launch.
 
-- **X11**: saves all monitor state before launch, switches game monitor to game resolution/rate, disables secondary, restores everything after
-- **Hyprland**: saves all monitor state before launch, disables secondary, restores everything (position, resolution, rate, transform) after
+On every launch:
+- **X11**: saves all monitor state, switches primary to game resolution/rate (`xrandr --output <mon> --mode <res> --rate <rate>`), sets `__GL_SYNC_DISPLAY_DEVICE`, runs game, restores everything
+- **Hyprland**: saves all monitor state, switches primary to game resolution/rate (`hyprctl keyword monitor <mon>,<res>@<rate>,auto,1`), runs game, restores everything
+
+If a secondary monitor is configured, it is also disabled during gameplay and re-enabled after:
+- **X11**: `xrandr --output <sec> --off`
+- **Hyprland**: `hyprctl keyword monitor <sec>,disable`
+
 - **Do not** run `ep_bm2dxnix` directly unless you want to skip display setup.
 
 ## What the script does
@@ -72,14 +78,14 @@ The `.desktop` entry handles display management:
 
 The script auto-detects your display server and compositor via `$XDG_SESSION_TYPE`:
 
-| Session | Monitor detection | Display switching | Notes |
-|---------|------------------|------------------|-------|
-| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | Untested |
-| **Hyprland** | `hyprctl monitors` | `hyprctl keyword monitor` (resolution, rate, position, transform) | Fully supported |
-| **Sway** / **Niri** (future) | - | - | Easy to add when requested |
-| **Other Wayland** | Manual input only | None | Fallback, no auto-detection |
+| Session | Monitor detection | Display switching | Helper used | Notes |
+|---------|------------------|------------------|-------------|-------|
+| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | Always | Fully supported |
+| **Hyprland** | `hyprctl monitors` | `hyprctl keyword monitor` (resolution, rate, position, transform) | Always | Fully supported |
+| **Sway** / **Niri** (future) | - | - | - | Easy to add when requested |
+| **Other Wayland** | Manual input only | None | Never | Fallback, no auto-detection |
 
-On both X11 and Hyprland, the script saves the full state of all monitors before the game and restores it after - position, resolution, refresh rate, and rotation/transform are preserved.
+On both X11 and Hyprland, the helper saves the full state of all monitors before the game and restores it after - position, resolution, refresh rate, and rotation/transform are preserved. The primary monitor is always switched to the configured game resolution and refresh rate, regardless of whether a secondary monitor is present.
 
 ## Asphyxia
 
