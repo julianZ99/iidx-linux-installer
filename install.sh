@@ -858,7 +858,7 @@ page_monitor() {
             x11)      detected_rate="$(detect_rate)" ;;
         esac
         log "Current refresh rate on $MONITOR: ${detected_rate:-unknown}hz"
-        log "IIDX requires 120hz. The launcher will switch automatically."
+        log "IIDX requires 120hz. The launcher will switch the primary monitor rate on every launch."
         echo ""
         prompt_value "Target game refresh rate" GAME_RATE "120" "120" || { GAME_RATE=""; pop_page; return; }
     else
@@ -1412,6 +1412,8 @@ page_launchers() {
     local exec_base="$q_auto/helper/ep_bm2dxnix $q_style --root $q_root"
 
     local exec_game
+    local q_res="$(printf '%q' "$GAME_RES")"
+    local q_rate="$(printf '%q' "$GAME_RATE")"
     local helper="$AUTOMIZATION_DIR/helper/iidx-mon-state.sh"
     case "$SESSION_TYPE" in
         hyprland)
@@ -1444,15 +1446,12 @@ HELPER
 
             if [ -n "$SECONDARY_MONITOR" ]; then
                 local q_sec="$(printf '%q' "$SECONDARY_MONITOR")"
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_sec"',disable && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
+                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_sec"',disable && hyprctl keyword monitor '"$q_mon"','"$q_res"'@'"$q_rate"',auto,1 && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
             else
-                exec_game="$exec_base"
+                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_mon"','"$q_res"'@'"$q_rate"',auto,1 && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
             fi
             ;;
         *)
-            local q_res="$(printf '%q' "$GAME_RES")"
-            local q_rate="$(printf '%q' "$GAME_RATE")"
-
             cat > "$helper" <<'HELPER'
 #!/bin/bash
 case "$1" in
