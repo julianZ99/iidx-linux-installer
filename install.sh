@@ -382,6 +382,7 @@ page_footer() {
 }
 
 read_nav() {
+    if [ "$AUTO_YES" = "1" ]; then return 0; fi
     local input
     while true; do
         echo -en "\n${YLW}[?]${RST} Press ${BLD}Enter${RST} to continue, ${BLD}b${RST} to go back, ${BLD}q${RST} to quit: "
@@ -420,7 +421,9 @@ download_file() {
 confirm() {
     local msg="$1"
     local default="${2:-y}"
-    if [ "$AUTO_YES" = "1" ]; then return 0; fi
+    if [ "$AUTO_YES" = "1" ]; then
+        [ "$default" = "y" ] && return 0 || return 1
+    fi
     local prompt
     [ "$default" = "y" ] && prompt="[Y/n]" || prompt="[y/N]"
     while true; do
@@ -446,6 +449,13 @@ prompt_value() {
     local current="${!varname}"
     if [ -n "$current" ]; then return; fi
     default="$(expand_path "${default:-}")"
+    if [ "$AUTO_YES" = "1" ]; then
+        if [ -n "$default" ]; then
+            printf -v "$varname" '%s' "$default"
+            return 0
+        fi
+        die "--yes requires --$varname to be set via CLI"
+    fi
     local hint=""
     [ -n "$default" ] && hint=" ${BLU}(default: $default)${RST}"
     [ -n "$example" ] && hint="$hint ${BLU}e.g. $example${RST}"
@@ -507,6 +517,9 @@ STEAM_HOME="$(expand_path "$STEAM_HOME")"
 DUMP_PATH="$(expand_path "$DUMP_PATH")"
 
 # Validate arguments
+if [ "$AUTO_YES" = "1" ] && ( [ -z "$GAME_STYLE" ] || [ -z "$DUMP_PATH" ] ); then
+    die "--yes requires --style <NUM> and --dump <PATH>"
+fi
 if [ -n "$GAME_STYLE" ] && ! [[ "$GAME_STYLE" =~ ^[0-9]+$ ]]; then
     die "--style must be a number, got: '$GAME_STYLE'"
 fi
@@ -1611,10 +1624,15 @@ page_done() {
     echo -e "       • Or run from terminal:"
     echo -e "         ${BLD}$AUTOMIZATION_DIR/helper/ep_bm2dxnix $GAME_STYLE --root $STEAM_ROOT${RST}"
     echo ""
+    echo -e "    ${CYN}4.${RST} To change server or cabinet ID later, edit:"
+    echo -e "       ${BLD}$DUMP_PATH/contents/prop/linux.json${RST}"
+    echo "         (look for the \"network\" section)"
 
     page_footer
-    echo -en "\n  Press Enter to exit."
-    read -r
+    if [ "$AUTO_YES" != "1" ]; then
+        echo -en "\n  Press Enter to exit."
+        read -r
+    fi
 }
 
 ##
