@@ -26,9 +26,9 @@ Interactive setup wizard - no arguments required. All values can be entered thro
 |----------|-------------|
 | `--style <NUM>` | Game version number (e.g. `32`) |
 | `--dump <PATH>` | Path to game dump directory (must contain a `contents/` folder) |
-| `--monitor <n>` | Primary monitor name (e.g. `DP-1`). Game runs on this display. |
-| `--secondary-monitor <n>` | Optional. Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay; all monitors fully restored after (position, resolution, rate, rotation). |
-| `--rate <HZ>` | Game refresh rate (default: `120`). The launcher auto-switches the primary monitor to this rate on every launch and restores it after. |
+| `--monitor <n>` | Primary monitor name (e.g. `DP-1`). Game runs on this display. Implicitly enables monitor management. |
+| `--secondary-monitor <n>` | Optional. Secondary monitor name (e.g. `HDMI-A-1`). Disabled during gameplay; all monitors fully restored after (position, resolution, rate, rotation). Implicitly enables monitor management. |
+| `--rate <HZ>` | Game refresh rate - only used when monitor management is enabled. Default: `120`; use `60` for some dumps/cabinets. |
 | `--proton-ver <VER>` | Proton-GE version (default: `8.32`) |
 | `--bmsound-ver <VER>` | bmsound_wine version (default: latest) |
 | `--spice-date <DATE>` | spicetools date (default: latest) |
@@ -53,11 +53,16 @@ After installation, launch the game from your application launcher or desktop:
 - Search for **Beatmania IIDX <version>** in your app menu
 - Or use the `.desktop` file created at `~/.local/share/applications/iidx<version>.desktop`
 
-The `.desktop` entry uses a helper script (`iidx-mon-state.sh`) that saves/restores all monitor state on every launch.
+Monitor management is **disabled by default**. To enable it, answer "yes" when prompted during the installation wizard, or pass `--monitor` (or `--secondary-monitor`/`--rate`) via CLI.
 
-On every launch:
+When enabled, the `.desktop` entry uses a helper script (`iidx-mon-state.sh`) that saves/restores all monitor state on every launch:
+
 - **X11**: saves all monitor state, switches primary to game resolution/rate (`xrandr --output <mon> --mode <res> --rate <rate>`), sets `__GL_SYNC_DISPLAY_DEVICE`, runs game, restores everything
 - **Hyprland**: saves all monitor state, switches primary to game resolution/rate (`hyprctl keyword monitor <mon>,<res>@<rate>,auto,1`), runs game, restores everything
+
+When disabled, the game launches directly without any display changes.
+
+> **Refresh rate**: Some dumps/cabinets run at 60 Hz, others at 120 Hz. You can set your monitor's refresh rate with `--rate` or via the installer's monitor page. When monitor management is enabled, the desktop entry switches to that rate automatically on every launch. If a dump expects a different rate, the game DLL can also be patched to change it.
 
 If a secondary monitor is configured, it is also disabled during gameplay and re-enabled after:
 - **X11**: `xrandr --output <sec> --off`
@@ -71,7 +76,7 @@ If a secondary monitor is configured, it is also disabled during gameplay and re
 2. Builds **bmsound_wine** (PipeWire audio bridge)
 3. Installs **spicetools** (launcher and I/O layer)
 4. Sets up symlinks, compatdata and Steam structure
-5. Creates `.desktop` launcher entries with full monitor state save/restore via a helper script
+5. Creates `.desktop` launcher entries; optionally with full monitor state save/restore via a helper script
 6. Optional **Asphyxia** network configuration (e.g. `https://asphyxia-core.app`)
 
 ## Session support
@@ -80,12 +85,12 @@ The script auto-detects your display server and compositor via `$XDG_SESSION_TYP
 
 | Session | Monitor detection | Display switching | Helper used | Notes |
 |---------|------------------|------------------|-------------|-------|
-| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | Always | Fully supported |
-| **Hyprland** | `hyprctl monitors` | `hyprctl keyword monitor` (resolution, rate, position, transform) | Always | Fully supported |
+| **X11** | `xrandr` | `xrandr --output` (resolution, rate, position, rotation) | When enabled | Fully supported |
+| **Hyprland** | `hyprctl monitors` | `hyprctl keyword monitor` (resolution, rate, position, transform) | When enabled | Fully supported |
 | **Sway** / **Niri** (future) | - | - | - | Easy to add when requested |
 | **Other Wayland** | Manual input only | None | Never | Fallback, no auto-detection |
 
-On both X11 and Hyprland, the helper saves the full state of all monitors before the game and restores it after - position, resolution, refresh rate, and rotation/transform are preserved. The primary monitor is always switched to the configured game resolution and refresh rate, regardless of whether a secondary monitor is present.
+Monitor management is off by default. When enabled, the helper saves the full state of all monitors before the game and restores it after - position, resolution, refresh rate, and rotation/transform are preserved. The primary monitor is always switched to the configured game resolution and refresh rate, regardless of whether a secondary monitor is present.
 
 ## Asphyxia
 

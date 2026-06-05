@@ -79,7 +79,7 @@ Options:
   --monitor        <n>     Primary monitor name (e.g. DP-1). Game runs on this display.
   --secondary-monitor <n>  Optional. Secondary monitor name (e.g. HDMI-A-1).
                            Disabled during gameplay, restored after.
-  --rate           <HZ>    Game refresh rate (default: 120)
+  --rate           <HZ>    Game refresh rate (default: 120; use 60 for some dumps/cabinets)
   --proton-ver     <VER>   Proton-GE version (default: 8.32)
   --bmsound-ver    <VER>   bmsound_wine version (default: latest)
   --spice-date     <DATE>  spicetools date (default: latest)
@@ -473,6 +473,7 @@ GAME_STYLE=""
 DUMP_PATH=""
 MONITOR=""
 SECONDARY_MONITOR=""
+MONITOR_MGMT=""
 BMSOUND_VER=""
 SPICE_DATE=""
 PROTON_VER="8.32"
@@ -487,15 +488,13 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --style)              GAME_STYLE="$2";           shift 2 ;;
         --dump)               DUMP_PATH="${2%/}";         shift 2 ;;
-        --monitor)            MONITOR="$2";               shift 2 ;;
-        --secondary-monitor)  SECONDARY_MONITOR="$2";    shift 2 ;;
+        --monitor)            MONITOR="$2"; MONITOR_MGMT=1; shift 2 ;;
+        --secondary-monitor)  SECONDARY_MONITOR="$2"; MONITOR_MGMT=1; shift 2 ;;
         --bmsound-ver)        BMSOUND_VER="$2";           shift 2 ;;
         --spice-date)         SPICE_DATE="$2";            shift 2 ;;
         --proton-ver)         PROTON_VER="$2";            shift 2 ;;
-        --rate)               GAME_RATE="$2";             shift 2 ;;
+        --rate)               GAME_RATE="$2"; MONITOR_MGMT=1; shift 2 ;;
         --asphyxia-url)       ASPHYXIA_URL="$2";          shift 2 ;;
-        --asphyxia-pcbid)     ASPHYXIA_PCBID="$2";        shift 2 ;;
-        --steam-home)         STEAM_HOME="${2%/}";        shift 2 ;;
         --uninstall)          UNINSTALL=1;                shift   ;;
         --yes|-y)             AUTO_YES=1;                 shift   ;;
         -h|--help)            usage ;;
@@ -782,6 +781,28 @@ page_monitor() {
     draw_header 3
     echo -e "  Configure your monitor setup.\n"
 
+    if [ -z "$MONITOR_MGMT" ]; then
+        local ret=0
+        confirm "Manage monitors automatically (resolution/rate switching, secondary disable)?" "n" || ret=$?
+        if [ $ret -eq 0 ]; then
+            MONITOR_MGMT=1
+        elif [ $ret -eq 2 ]; then
+            pop_page; return
+        else
+            MONITOR_MGMT=0
+        fi
+    fi
+
+    if [ "$MONITOR_MGMT" = "0" ]; then
+        MONITOR=""
+        SECONDARY_MONITOR=""
+        GAME_RATE=""
+        GAME_RES=""
+        page_footer
+        read_nav || { pop_page; return; }
+        return
+    fi
+
     if [ -z "$MONITOR" ]; then
         echo -e "  ${BLD}Connected monitors:${RST}"
         case "$SESSION_TYPE" in
@@ -858,9 +879,9 @@ page_monitor() {
             x11)      detected_rate="$(detect_rate)" ;;
         esac
         log "Current refresh rate on $MONITOR: ${detected_rate:-unknown}hz"
-        log "IIDX requires 120hz. The launcher will switch the primary monitor rate on every launch."
+        log "IIDX typically requires 120hz (60hz for some dumps/cabinets). The launcher will switch the primary monitor rate on every launch."
         echo ""
-        prompt_value "Target game refresh rate" GAME_RATE "120" "120" || { GAME_RATE=""; pop_page; return; }
+        prompt_value "Target game refresh rate (60 or 120 depending on dump)" GAME_RATE "120" "120" || { GAME_RATE=""; pop_page; return; }
     else
         success "Game refresh rate: ${GAME_RATE}hz"
     fi
@@ -924,10 +945,14 @@ page_summary() {
     echo -e "  ${BLD}Installation summary${RST}\n"
     echo -e "  Game style        : ${BLD}${GRN}$GAME_STYLE${RST}"
     echo -e "  Dump path         : ${BLD}$DUMP_PATH${RST}"
-    echo -e "  Primary monitor   : ${BLD}$MONITOR${RST}"
-    [ -n "$SECONDARY_MONITOR" ] && \
-        echo -e "  Secondary monitor : ${BLD}$SECONDARY_MONITOR${RST} ${YLW}(off during game)${RST}"
-    echo -e "  Resolution        : ${BLD}$GAME_RES @ ${GAME_RATE}hz${RST}"
+    if [ "$MONITOR_MGMT" = "1" ]; then
+        echo -e "  Primary monitor   : ${BLD}$MONITOR${RST}"
+        [ -n "$SECONDARY_MONITOR" ] && \
+            echo -e "  Secondary monitor : ${BLD}$SECONDARY_MONITOR${RST} ${YLW}(off during game)${RST}"
+        echo -e "  Resolution        : ${BLD}$GAME_RES @ ${GAME_RATE}hz${RST}"
+    else
+        echo -e "  Monitor mgmt      : ${YLW}disabled${RST}"
+    fi
     echo -e "  bmsound_wine      : ${BLD}$BMSOUND_VER${RST}"
     echo -e "  spicetools        : ${BLD}$SPICE_VER${RST}"
     echo -e "  proton-ge         : ${BLD}$PROTON_VER${RST} → $PROTON_DIR"
@@ -1228,6 +1253,7 @@ page_proton() {
         cp "$AUTOMIZATION_DIR/proton-ge/000"*.py protonfixes/gamefixes/ 2>/dev/null || true
         cp "$AUTOMIZATION_DIR/proton-ge/000"*.py protonfixes/gamefixes-steam/ 2>/dev/null || true
     )
+    rm -rf "$proton_dest"
     mv "$WORK_DIR/proton-ge" "$proton_dest"
     success "Proton-GE installed at $proton_dest"
 
@@ -1408,9 +1434,34 @@ page_launchers() {
     local q_auto="$(printf '%q' "$AUTOMIZATION_DIR")"
     local q_style="$(printf '%q' "$GAME_STYLE")"
     local q_root="$(printf '%q' "$STEAM_ROOT")"
-    local q_mon="$(printf '%q' "$MONITOR")"
     local exec_base="$q_auto/helper/ep_bm2dxnix $q_style --root $q_root"
 
+    if [ "$MONITOR_MGMT" = "0" ]; then
+        # Simple desktop entries without monitor switching
+        cat > "$HOME/.local/share/applications/iidx${GAME_STYLE}.desktop" <<EOF
+[Desktop Entry]
+Name=Beatmania IIDX $GAME_STYLE
+Exec=$exec_base
+Type=Application
+Categories=Game;
+EOF
+        success "iidx${GAME_STYLE}.desktop created (no monitor mgmt)"
+
+        cat > "$HOME/.local/share/applications/iidx${GAME_STYLE}-cfg.desktop" <<EOF
+[Desktop Entry]
+Name=Beatmania IIDX $GAME_STYLE (Config)
+Exec=$exec_base --cfg
+Type=Application
+Categories=Game;
+EOF
+        success "iidx${GAME_STYLE}-cfg.desktop created"
+
+        page_footer
+        read_nav || { pop_page; return; }
+        return
+    fi
+
+    local q_mon="$(printf '%q' "$MONITOR")"
     local exec_game
     local q_res="$(printf '%q' "$GAME_RES")"
     local q_rate="$(printf '%q' "$GAME_RATE")"
@@ -1527,6 +1578,12 @@ page_patches() {
     echo -e "         Apply if you don't have a Lightning Model cabinet.\n"
     echo -e "    ${RED}✗${RST}  ${BLD}WASAPI shared${RST}"
     echo -e "         Do ${BLD}NOT${RST} enable this.\n"
+    echo -e "  ${BLD}Refresh rate:${RST}\n"
+    echo -e "    Some dumps expect 60 Hz, others 120 Hz. You can set your monitor's"
+    echo -e "    refresh rate using ${BLD}--rate${RST} or via the installer's monitor page."
+    echo -e "    When monitor management is enabled, the desktop entry will switch"
+    echo -e "    to that rate automatically on every launch. If a dump expects a"
+    echo -e "    different rate, the game DLL can also be patched to change it.\n"
     echo ""
     warn "Try launching the game without patches first."
     warn "Only enable a patch if the game fails to start without it."
