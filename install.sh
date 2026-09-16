@@ -23,11 +23,16 @@ MAG='\033[0;35m'
 BLD='\033[1m'
 RST='\033[0m'
 
+# Respect the de-facto NO_COLOR convention and keep redirected output clean.
+if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+    RED='' GRN='' YLW='' BLU='' CYN='' MAG='' BLD='' RST=''
+fi
+
 ## The installer manages privileged operations with sudo itself. Running the
 ## whole wizard as root changes HOME/USER and can make it use root's Steam and
 ## desktop directories instead of the invoking user's installation.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${EUID:-$(id -u)}" -eq 0 ]; then
-    echo -e "${RED}[ERROR]${RST} Do not run this installer as root or with sudo." >&2
+    echo -e "  ${RED}✗${RST} Do not run this installer as root or with sudo." >&2
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
         echo "Run it again as '$SUDO_USER' without sudo: ./install.sh" >&2
     else
@@ -410,87 +415,123 @@ init_pkg_maps() {
 ## UI helpers
 ##
 
+ui_rule() {
+    local width="${_CURRENT_UI_WIDTH:-80}"
+    local rule
+    printf -v rule '%*s' "$width" ''
+    rule="${rule// /─}"
+    echo -e "${BLU}${rule}${RST}"
+}
+
+ui_center() {
+    local text="$1"
+    local visible_length="$2"
+    local width="${_CURRENT_UI_WIDTH:-80}"
+    local padding=$(( (width - visible_length) / 2 ))
+    [ "$padding" -lt 0 ] && padding=0
+    printf '%*s%b\n' "$padding" '' "$text"
+}
+
+ui_phase() {
+    local page_idx="$1"
+    if [ "$page_idx" -le 5 ]; then
+        echo "SETUP"
+    elif [ "$page_idx" -le 14 ]; then
+        echo "INSTALL"
+    else
+        echo "FINISH"
+    fi
+}
+
+ui_section() {
+    echo -e "  ${BLD}$1${RST}"
+    echo ""
+}
+
+ui_kv() {
+    printf '  %-20s %b\n' "$1" "$2"
+}
+
 draw_header() {
     local page_idx="$1"
     local page_name="${PAGE_NAMES[$page_idx]}"
     local term_width
     term_width="$(tput cols 2>/dev/null || echo 80)"
 
-    clear
+    [[ "$term_width" =~ ^[0-9]+$ ]] || term_width=80
+    [ "$term_width" -lt 20 ] && term_width=20
+
+    local ui_width="$term_width"
+    [ "$ui_width" -gt 100 ] && ui_width=100
+    [ "$page_idx" -eq 0 ] && [ "$term_width" -ge 109 ] && ui_width=109
+
+    [ -t 1 ] && clear
 
     _CURRENT_TERM_WIDTH="$term_width"
+    _CURRENT_UI_WIDTH="$ui_width"
 
-    # ASCII art
-    echo -e "${MAG}${BLD}"
-    echo "▄█ ▄█ ██▄      ▄      █    ▄█    ▄     ▄       ▄      ▄█    ▄      ▄▄▄▄▄      ▄▄▄▄▀ ██   █     ▄███▄   █▄▄▄▄ "
-    echo "██ ██ █  █ ▀▄   █     █    ██     █     █  ▀▄   █     ██     █    █     ▀▄ ▀▀▀ █    █ █  █     █▀   ▀  █  ▄▀ "
-    echo "██ ██ █   █  █ ▀      █    ██ ██   █ █   █   █ ▀      ██ ██   █ ▄  ▀▀▀▀▄       █    █▄▄█ █     ██▄▄    █▀▀▌  "
-    echo "▐█ ▐█ █  █  ▄ █       ███▄ ▐█ █ █  █ █   █  ▄ █       ▐█ █ █  █  ▀▄▄▄▄▀       █     █  █ ███▄  █▄   ▄▀ █  █  "
-    echo " ▐  ▐ ███▀ █   ▀▄         ▀ ▐ █  █ █ █▄ ▄█ █   ▀▄      ▐ █  █ █              ▀         █     ▀ ▀███▀     █   "
-    echo "            ▀                 █   ██  ▀▀▀   ▀            █   ██                       █                 ▀    "
-    echo "                                                                                     ▀ "
-    echo -e "${RST}"
-    echo ""
+    # Keep the large logo for the welcome page only. On narrower terminals a
+    # compact title avoids wrapping and consuming most of the viewport.
+    if [ "$page_idx" -eq 0 ] && [ "$term_width" -ge 109 ]; then
+        echo -e "${MAG}${BLD}"
+        echo "▄█ ▄█ ██▄      ▄      █    ▄█    ▄     ▄       ▄      ▄█    ▄      ▄▄▄▄▄      ▄▄▄▄▀ ██   █     ▄███▄   █▄▄▄▄ "
+        echo "██ ██ █  █ ▀▄   █     █    ██     █     █  ▀▄   █     ██     █    █     ▀▄ ▀▀▀ █    █ █  █     █▀   ▀  █  ▄▀ "
+        echo "██ ██ █   █  █ ▀      █    ██ ██   █ █   █   █ ▀      ██ ██   █ ▄  ▀▀▀▀▄       █    █▄▄█ █     ██▄▄    █▀▀▌  "
+        echo "▐█ ▐█ █  █  ▄ █       ███▄ ▐█ █ █  █ █   █  ▄ █       ▐█ █ █  █  ▀▄▄▄▄▀       █     █  █ ███▄  █▄   ▄▀ █  █  "
+        echo " ▐  ▐ ███▀ █   ▀▄         ▀ ▐ █  █ █ █▄ ▄█ █   ▀▄      ▐ █  █ █              ▀         █     ▀ ▀███▀     █   "
+        echo "            ▀                 █   ██  ▀▀▀   ▀            █   ██                       █                 ▀    "
+        echo "                                                                                     ▀ "
+        echo -e "${RST}"
+    else
+        local phase
+        phase="$(ui_phase "$page_idx")"
+        local title="IIDX Linux Installer"
+        if [ "$ui_width" -ge 32 ]; then
+            local gap=$((ui_width - ${#title} - ${#phase} - 4))
+            [ "$gap" -lt 1 ] && gap=1
+            printf '  %b%s%b%*s%b%s%b\n' "$MAG$BLD" "$title" "$RST" "$gap" '' "$CYN$BLD" "$phase" "$RST"
+        else
+            printf '  %bIIDX Installer%b\n' "$MAG$BLD" "$RST"
+        fi
+    fi
 
-    # Divider: header ↔ navbar
-    local div=""
-    for ((i=0; i<term_width; i++)); do div="${div}─"; done
-    echo -e "${BLU}${div}${RST}"
+    ui_rule
 
-    # Step label (centered)
-    local page_label="Step $((page_idx + 1)) / $TOTAL_PAGES - $page_name"
-    local label_len=${#page_label}
-    local label_pad=$(( (term_width - label_len) / 2 ))
-    local lp=""
-    for ((i=0; i<label_pad; i++)); do lp="$lp "; done
-    echo -e "${lp}${CYN}${BLD}${page_label}${RST}"
+    local page_label="Step $((page_idx + 1))/$TOTAL_PAGES · $page_name"
+    ui_center "${CYN}${BLD}${page_label}${RST}" "${#page_label}"
 
-    # Progress bar (centered)
-    local bar_width=40
-    local filled=$(( (page_idx * bar_width) / (TOTAL_PAGES - 1) ))
+    local bar_width=$((ui_width - 8))
+    [ "$bar_width" -gt 48 ] && bar_width=48
+    [ "$bar_width" -lt 12 ] && bar_width=12
+    local filled=$(( ((page_idx + 1) * bar_width) / TOTAL_PAGES ))
     local bar="${GRN}"
     for ((i=0; i<filled; i++)); do bar="${bar}█"; done
     bar="${bar}${YLW}"
     for ((i=filled; i<bar_width; i++)); do bar="${bar}░"; done
     bar="${bar}${RST}"
-    local bar_pad=$(( (term_width - bar_width) / 2 ))
-    local bp=""
-    for ((i=0; i<bar_pad; i++)); do bp="$bp "; done
-    echo -e "${bp}${bar}"
+    ui_center "$bar" "$bar_width"
 
-    # Nav hint (centered, same width reference as bar)
-    local hint="b=back  q=quit  Enter=continue"
-    local hint_len=${#hint}
-    local hint_pad=$(( (term_width - hint_len) / 2 ))
-    local hp=""
-    for ((i=0; i<hint_pad; i++)); do hp="$hp "; done
-    echo -e "${hp}${YLW}b${RST}=back  ${YLW}q${RST}=quit  ${YLW}Enter${RST}=continue"
-
-    # Divider: navbar ↔ content
-    echo -e "${BLU}${div}${RST}"
+    ui_rule
     echo ""
 }
 
 page_footer() {
-    # Footer is now just a closing divider - navbar is in the header
-    local term_width="${_CURRENT_TERM_WIDTH:-80}"
     echo ""
-    local div=""
-    for ((i=0; i<term_width; i++)); do div="${div}─"; done
-    echo -e "${BLU}${div}${RST}"
+    ui_rule
 }
 
 read_nav() {
     if [ "$AUTO_YES" = "1" ]; then return 0; fi
     local input
     while true; do
-        echo -en "\n${YLW}[?]${RST} Press ${BLD}Enter${RST} to continue, ${BLD}b${RST} to go back, ${BLD}q${RST} to quit: "
+        echo -e "\n  ${BLD}Enter${RST} Continue   ${BLD}b${RST} Back   ${BLD}q${RST} Quit"
+        echo -en "  ${CYN}›${RST} "
         read -r input
         case "${input,,}" in
             "") return 0 ;;
             b)  return 1 ;;
             q)  echo "Aborted."; exit 0 ;;
-            *)  echo "  Enter=continue  b=back  q=quit" ;;
+            *)  warn "Use Enter to continue, b to go back, or q to quit." ;;
         esac
     done
 }
@@ -501,10 +542,10 @@ pop_page() {
     fi
 }
 
-log()     { echo -e "${BLU}[INFO]${RST} $*"; }
-warn()    { echo -e "${YLW}[WARN]${RST} $*"; }
-die()     { echo -e "${RED}[ERROR]${RST} $*"; exit 1; }
-success() { echo -e "${GRN}[OK]${RST} $*"; }
+log()     { echo -e "  ${BLU}●${RST} $*"; }
+warn()    { echo -e "  ${YLW}△${RST} $*"; }
+die()     { echo -e "  ${RED}✗${RST} $*"; exit 1; }
+success() { echo -e "  ${GRN}✓${RST} $*"; }
 
 download_file() {
     # download_file "label" "url" "dest"
@@ -526,7 +567,7 @@ confirm() {
     local prompt
     [ "$default" = "y" ] && prompt="[Y/n]" || prompt="[y/N]"
     while true; do
-        echo -en "${YLW}[?]${RST} $msg $prompt "
+        echo -en "  ${YLW}?${RST} $msg ${BLD}$prompt${RST} "
         read -r answer
         answer="${answer:-$default}"
         case "${answer,,}" in
@@ -534,7 +575,7 @@ confirm() {
             n|no)  return 1 ;;
             b) return 2 ;;
             q) echo "Aborted."; exit 0 ;;
-            *) echo "  Please answer y/n  b=back  q=quit" ;;
+            *) warn "Answer y/n, b to go back, or q to quit." ;;
         esac
     done
 }
@@ -559,7 +600,7 @@ prompt_value() {
     [ -n "$default" ] && hint=" ${BLU}(default: $default)${RST}"
     [ -n "$example" ] && hint="$hint ${BLU}e.g. $example${RST}"
     while true; do
-        echo -en "${CYN}[?]${RST} $msg$hint: "
+        echo -en "  ${CYN}?${RST} $msg$hint: "
         read -r value
         case "${value,,}" in
             b) return 1 ;;
@@ -571,7 +612,7 @@ prompt_value() {
             printf -v "$varname" '%s' "$value"
             return 0
         fi
-        echo "  Value required.  b=back  q=quit"
+        warn "A value is required. Use b to go back or q to quit."
     done
 }
 
@@ -989,7 +1030,7 @@ page_steam() {
         echo ""
         local choice=""
         while true; do
-            echo -en "${CYN}[?]${RST} Select installation [1-${#found_list[@]}], or type a custom path: "
+            echo -en "  ${CYN}?${RST} Select installation [1-${#found_list[@]}], or type a custom path: "
             read -r choice
             case "${choice,,}" in
                 b) pop_page; return ;;
@@ -1253,23 +1294,23 @@ page_versions() {
 
 page_summary() {
     draw_header 5
-    echo -e "  ${BLD}Installation summary${RST}\n"
-    echo -e "  Game style        : ${BLD}${GRN}$GAME_STYLE${RST}"
-    echo -e "  Dump path         : ${BLD}$DUMP_PATH${RST}"
+    ui_section "Installation summary"
+    ui_kv "Game style" "${BLD}${GRN}$GAME_STYLE${RST}"
+    ui_kv "Dump path" "${BLD}$DUMP_PATH${RST}"
     if [ "$MONITOR_MGMT" = "1" ]; then
-        echo -e "  Primary monitor   : ${BLD}$MONITOR${RST}"
+        ui_kv "Primary monitor" "${BLD}$MONITOR${RST}"
         [ -n "$SECONDARY_MONITOR" ] && \
-            echo -e "  Secondary monitor : ${BLD}$SECONDARY_MONITOR${RST} ${YLW}(off during game)${RST}"
-        echo -e "  Resolution        : ${BLD}$GAME_RES @ ${GAME_RATE}hz${RST}"
+            ui_kv "Secondary monitor" "${BLD}$SECONDARY_MONITOR${RST} ${YLW}(off during game)${RST}"
+        ui_kv "Resolution" "${BLD}$GAME_RES @ ${GAME_RATE}hz${RST}"
     else
-        echo -e "  Monitor mgmt      : ${YLW}disabled${RST}"
+        ui_kv "Monitor management" "${YLW}disabled${RST}"
     fi
-    echo -e "  bmsound_wine      : ${BLD}$BMSOUND_VER${RST}"
-    echo -e "  spicetools        : ${BLD}$SPICE_VER${RST}"
-    echo -e "  proton-ge         : ${BLD}$PROTON_VER${RST} → $PROTON_DIR"
-    echo -e "  Steam home        : ${BLD}$STEAM_HOME${RST}"
-    echo -e "  Install base      : ${BLD}$IIDX_BASE${RST}"
-    echo -e "  Distro / PM      : ${BLD}$DISTRO_NAME / ${PKG_MGR:-none}${RST}"
+    ui_kv "bmsound_wine" "${BLD}$BMSOUND_VER${RST}"
+    ui_kv "spicetools" "${BLD}$SPICE_VER${RST}"
+    ui_kv "Proton-GE" "${BLD}$PROTON_VER${RST} → $PROTON_DIR"
+    ui_kv "Steam home" "${BLD}$STEAM_HOME${RST}"
+    ui_kv "Install base" "${BLD}$IIDX_BASE${RST}"
+    ui_kv "Distro / PM" "${BLD}$DISTRO_NAME / ${PKG_MGR:-none}${RST}"
     echo ""
     warn "This will modify your system. Make sure everything above is correct."
     echo ""
