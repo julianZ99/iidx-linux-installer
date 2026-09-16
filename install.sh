@@ -573,9 +573,73 @@ download_file() {
     local url="$2"
     local dest="$3"
 
-    echo -e "  ${BLU}↓${RST} ${BLD}${label}${RST}"
-    wget -q --show-progress "$url" -O "$dest"
+    if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
+        ui_run_with_spinner "Downloading $label" wget -q "$url" -O "$dest"
+    else
+        echo -e "  ${BLU}↓${RST} ${BLD}${label}${RST}"
+        wget -q --show-progress "$url" -O "$dest"
+    fi
     success "$label downloaded"
+}
+
+ui_spinner_start() {
+    local label="$1"
+    [ -t 1 ] || return 0
+    [ "${TERM:-dumb}" != "dumb" ] || return 0
+    [ -z "${UI_SPINNER_PID:-}" ] || return 0
+
+    (
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        local frame=0
+        while :; do
+            printf '\r\033[K  %b%s%b %s' "$CYN" "${frames[$frame]}" "$RST" "$label"
+            frame=$(((frame + 1) % ${#frames[@]}))
+            sleep 0.12
+        done
+    ) &
+    UI_SPINNER_PID=$!
+}
+
+ui_spinner_stop() {
+    local spinner_pid="${UI_SPINNER_PID:-}"
+    [ -n "$spinner_pid" ] || return 0
+    kill "$spinner_pid" 2>/dev/null || true
+    wait "$spinner_pid" 2>/dev/null || true
+    printf '\r\033[K'
+    UI_SPINNER_PID=""
+}
+
+ui_run_with_spinner() {
+    local label="$1"
+    shift
+
+    # Preserve normal command output in scripts, pipes, and basic terminals.
+    if [ ! -t 1 ] || [ "${TERM:-dumb}" = "dumb" ]; then
+        "$@"
+        return $?
+    fi
+
+    local log_dir="${WORK_DIR:-${TMPDIR:-/tmp}}"
+    local output_log
+    output_log="$(mktemp "$log_dir/iidx-ui-XXXXXX")"
+    "$@" >"$output_log" 2>&1 &
+    local command_pid=$!
+    ui_spinner_start "$label"
+
+    local rc=0
+    if wait "$command_pid"; then
+        :
+    else
+        rc=$?
+    fi
+    ui_spinner_stop
+
+    if [ "$rc" -ne 0 ]; then
+        warn "$label failed (exit $rc); recent output:"
+        tail -n 40 "$output_log"
+    fi
+    rm -f "$output_log"
+    return "$rc"
 }
 
 confirm() {
@@ -1293,11 +1357,12 @@ page_monitor() {
 
 page_versions() {
     draw_header 4
-    echo -e "  Fetching component versions...\n"
+    echo ""
 
     if [ -z "$BMSOUND_VER" ]; then
-        log "Fetching latest bmsound_wine version..."
+        ui_spinner_start "Checking bmsound_wine releases"
         BMSOUND_VER="$(fetch_latest_bmsound)"
+        ui_spinner_stop
         [ -n "$BMSOUND_VER" ] || die "Could not fetch bmsound_wine version"
         success "bmsound_wine: $BMSOUND_VER"
     else
@@ -1305,8 +1370,9 @@ page_versions() {
     fi
 
     if [ -z "$SPICE_DATE" ]; then
-        log "Fetching latest spicetools version..."
+        ui_spinner_start "Checking spicetools releases"
         SPICE_DATE="$(fetch_latest_spice_date)"
+        ui_spinner_stop
         [ -n "$SPICE_DATE" ] || die "Could not fetch spicetools date"
         success "spicetools date: $SPICE_DATE"
     else
@@ -1888,9 +1954,9 @@ page_base() {
     success "Base directory ready: $IIDX_BASE"
 
     if [ ! -d "$AUTOMIZATION_DIR" ]; then
-        log "Cloning automatization..."
-        git clone https://codeberg.org/nixac/automatization \
-            --recurse-submodules "$AUTOMIZATION_DIR"
+        ui_run_with_spinner "Cloning automatization" \
+            git clone https://codeberg.org/nixac/automatization \
+                --recurse-submodules "$AUTOMIZATION_DIR"
         success "automatization cloned"
     else
         success "automatization already present, skipping clone"
@@ -1924,7 +1990,7 @@ page_base() {
 
 page_proton() {
     draw_header 9
-    echo -e "  Downloading and patching Proton-GE $PROTON_VER for IIDX $GAME_STYLE...\n"
+    echo ""
 
     local proton_dest="$STEAM_ROOT/steamapps/common/$PROTON_DIR"
     local proton_tag="GE-Proton${PROTON_VER//./-}"
@@ -1936,8 +2002,8 @@ page_proton() {
         "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${proton_tag}/${proton_tag}.tar.gz" \
         "$WORK_DIR/proton-ge.tar.gz"
 
-    log "Extracting..."
-    tar -xf "$WORK_DIR/proton-ge.tar.gz" -C "$WORK_DIR"
+    ui_run_with_spinner "Extracting Proton-GE" \
+        tar -xf "$WORK_DIR/proton-ge.tar.gz" -C "$WORK_DIR"
     mv "$WORK_DIR/$proton_tag" "$WORK_DIR/proton-ge"
 
     log "Applying patches..."
@@ -1958,7 +2024,7 @@ page_proton() {
 
 page_binaries() {
     draw_header 10
-    echo -e "  Downloading spicetools and building bmsound_wine...\n"
+    echo ""
 
     check_disk_space "$WORK_DIR" 2000 "temp dir"
 
@@ -1966,25 +2032,26 @@ page_binaries() {
         "https://codeberg.org/nixac/spicetools/releases/download/${SPICE_VER}/spicetools.tar.gz" \
         "$WORK_DIR/spicetools.tar.gz"
     mkdir -p "$WORK_DIR/spicetools"
-    tar -xf "$WORK_DIR/spicetools.tar.gz" -C "$WORK_DIR/spicetools"
+    ui_run_with_spinner "Extracting spicetools" \
+        tar -xf "$WORK_DIR/spicetools.tar.gz" -C "$WORK_DIR/spicetools"
     success "spicetools extracted"
 
-    echo ""
-    log "Cloning bmsound_wine $BMSOUND_VER..."
-    git clone https://codeberg.org/nixac/bmsound_wine "$WORK_DIR/bmsound_wine"
+    ui_run_with_spinner "Cloning bmsound_wine $BMSOUND_VER" \
+        git clone https://codeberg.org/nixac/bmsound_wine "$WORK_DIR/bmsound_wine"
     (
         cd "$WORK_DIR/bmsound_wine"
-        git fetch --tags
+        ui_run_with_spinner "Fetching bmsound_wine tags" git fetch --tags
         git checkout "tags/${BMSOUND_VER}"
-        git submodule update --init --recursive
-        log "Building bmsound_wine..."
+        ui_run_with_spinner "Fetching bmsound_wine submodules" \
+            git submodule update --init --recursive
         # Upstream defaults to x86_64-pc-linux-gnu-pkg-config, which is not
         # provided by Void. Use the validated native pkg-config command so the
         # PipeWire/SPA and FFmpeg include paths are passed to the compiler.
         # Build only the production artifacts: the generic "build" target also
         # compiles test programs that require unrelated development headers.
-        make -Rs bmsound-pw@post bmsound-wine@post \
-            TARGET_ARCH=x64 TARGET_TYPE=Release PKG_CONFIG=pkg-config
+        ui_run_with_spinner "Compiling bmsound_wine" \
+            make -Rs bmsound-pw@post bmsound-wine@post \
+                TARGET_ARCH=x64 TARGET_TYPE=Release PKG_CONFIG=pkg-config
     )
 
     local bmsw_src=""
