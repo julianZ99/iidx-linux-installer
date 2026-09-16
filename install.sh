@@ -172,8 +172,12 @@ preflight_check() {
         die "sudo access is required but not available."
     fi
 
-    if ! curl -sf "https://codeberg.org" >/dev/null 2>&1; then
-        warn "Cannot reach codeberg.org - network may be unavailable."
+    local unavailable_hosts=()
+    for host in codeberg.org github.com; do
+        curl -sf --max-time 10 "https://$host" >/dev/null 2>&1 || unavailable_hosts+=("$host")
+    done
+    if [ ${#unavailable_hosts[@]} -gt 0 ]; then
+        warn "Cannot reach: ${unavailable_hosts[*]} - network may be unavailable."
         confirm "Continue anyway?" "n" || die "Aborting due to network check"
     fi
 }
