@@ -407,12 +407,6 @@ init_pkg_maps() {
             )
             ;;
     esac
-    if [ "$SESSION_TYPE" != "x11" ]; then
-        unset 'CMD_PKG[xrandr]'
-    fi
-    if [ "$SESSION_TYPE" != "plasma-wayland" ]; then
-        unset 'CMD_PKG[kscreen-doctor]'
-    fi
 }
 
 ##
@@ -814,12 +808,12 @@ detect_steam_home() {
     printf '%s\n' "${found[@]}"
 }
 
-detect_resolution() {
+monitor_resolution_x11() {
     local monitor="${1:-$MONITOR}"
     xrandr 2>/dev/null | grep "^$monitor " -A1 | grep -oP '\d+x\d+(?=\+0\+0)' | head -1 || true
 }
 
-detect_rate() {
+monitor_rate_x11() {
     local monitor="${1:-$MONITOR}"
     xrandr 2>/dev/null | grep "^$monitor " | grep -oP '\d+\.\d+(?=\*)' | head -1 || true
 }
@@ -856,26 +850,51 @@ detect_compositor() {
     esac
 }
 
-monitor_backend_supported() {
+monitor_backend_name() {
     case "$SESSION_TYPE" in
-        x11|hyprland|plasma-wayland) return 0 ;;
+        x11) printf 'x11\n' ;;
+        hyprland) printf 'hyprland\n' ;;
+        plasma-wayland) printf 'plasma\n' ;;
         *) return 1 ;;
     esac
 }
 
+monitor_backend_supported() {
+    monitor_backend_name >/dev/null
+}
+
+monitor_ready_x11() {
+    command -v xrandr &>/dev/null && xrandr --query &>/dev/null
+}
+monitor_ready_hyprland() {
+    command -v hyprctl &>/dev/null && hyprctl monitors &>/dev/null
+}
+monitor_ready_plasma() {
+    command -v kscreen-doctor &>/dev/null && refresh_kscreen_output
+}
+monitor_readiness_hint_x11() {
+    printf 'X11 monitor management requires a working xrandr connection.\n'
+}
+monitor_readiness_hint_hyprland() {
+    printf 'Hyprland monitor management requires a working hyprctl connection.\n'
+}
+monitor_readiness_hint_plasma() {
+    printf 'KDE Plasma Wayland requires a working kscreen-doctor (%s).\n' "${CMD_PKG[kscreen-doctor]:-libkscreen}"
+}
+monitor_dependency_commands_x11() {
+    printf 'xrandr\n'
+}
+monitor_dependency_commands_hyprland() {
+    :
+}
+monitor_dependency_commands_plasma() {
+    if [ "$MONITOR_MGMT" = "1" ]; then
+        printf 'kscreen-doctor\n'
+    fi
+}
+
 monitor_backend_ready() {
-    case "$SESSION_TYPE" in
-        x11)
-            command -v xrandr &>/dev/null && xrandr --query &>/dev/null
-            ;;
-        hyprland)
-            command -v hyprctl &>/dev/null && hyprctl monitors &>/dev/null
-            ;;
-        plasma-wayland)
-            command -v kscreen-doctor &>/dev/null && refresh_kscreen_output
-            ;;
-        *) return 1 ;;
-    esac
+    monitor_backend_call ready
 }
 
 disable_monitor_management() {
@@ -888,29 +907,20 @@ disable_monitor_management() {
 }
 
 ## Hyprland-specific monitor helpers
-list_monitors_hyprland() {
+monitor_list_hyprland() {
     hyprctl monitors all 2>/dev/null | grep "^Monitor " | awk '{print $2}'
 }
-hyprland_monitor_resolution() {
+monitor_resolution_hyprland() {
     hyprctl monitors all 2>/dev/null | grep -A1 "^Monitor $1 " | tail -1 | grep -oP '\d+x\d+(?=@)' || true
 }
-hyprland_monitor_rate() {
+monitor_rate_hyprland() {
     hyprctl monitors all 2>/dev/null | grep -A1 "^Monitor $1 " | tail -1 | grep -oP '@\K[\d.]+' || true
-}
-monitor_list_hyprland() {
-    list_monitors_hyprland
 }
 monitor_description_hyprland() {
     printf '%s\n' "$1"
 }
 monitor_exists_hyprland() {
     hyprctl monitors all 2>/dev/null | awk -v name="$1" '$1 == "Monitor" && $2 == name { found=1 } END { exit !found }'
-}
-monitor_resolution_hyprland() {
-    hyprland_monitor_resolution "$1"
-}
-monitor_rate_hyprland() {
-    hyprland_monitor_rate "$1"
 }
 ## KDE Plasma Wayland monitor helpers (KScreen/KWin). The human-readable
 ## output is used here because jq is installed later on the dependency page.
@@ -925,7 +935,7 @@ kscreen_output_text() {
         kscreen-doctor -o 2>/dev/null | sed $'s/\033\[[0-9;]*m//g'
     fi
 }
-list_monitors_plasma() {
+monitor_list_plasma() {
     kscreen_output_text | awk '
         function print_connected() {
             if (name != "" && connected) print name
@@ -941,7 +951,7 @@ list_monitors_plasma() {
     '
 }
 monitor_exists_plasma() {
-    list_monitors_plasma | grep -Fxq -- "$1"
+    monitor_list_plasma | grep -Fxq -- "$1"
 }
 monitor_mode_plasma() {
     kscreen_output_text | awk -v name="$1" '
@@ -953,12 +963,12 @@ monitor_mode_plasma() {
         }
     '
 }
-plasma_monitor_resolution() {
+monitor_resolution_plasma() {
     local mode
     mode="$(monitor_mode_plasma "$1")"
     printf '%s\n' "${mode%@*}"
 }
-plasma_monitor_rate() {
+monitor_rate_plasma() {
     local mode
     mode="$(monitor_mode_plasma "$1")"
     printf '%s\n' "${mode##*@}"
@@ -992,17 +1002,8 @@ monitor_mode_id_plasma() {
     '
 }
 
-monitor_list_plasma() {
-    list_monitors_plasma
-}
 monitor_description_plasma() {
     printf '%s\n' "$1"
-}
-monitor_resolution_plasma() {
-    plasma_monitor_resolution "$1"
-}
-monitor_rate_plasma() {
-    plasma_monitor_rate "$1"
 }
 monitor_list_x11() {
     xrandr 2>/dev/null | awk '$2 == "connected" { print $1 }'
@@ -1013,18 +1014,13 @@ monitor_description_x11() {
 monitor_exists_x11() {
     xrandr 2>/dev/null | awk -v name="$1" '$1 == name && $2 == "connected" { found=1 } END { exit !found }'
 }
-monitor_resolution_x11() {
-    detect_resolution "$1"
-}
-monitor_rate_x11() {
-    detect_rate "$1"
-}
 monitor_launcher_exec_hyprland() {
     local helper="$1" exec_base="$2" monitor="$3" resolution="$4"
     local refresh_rate="$5" secondary_monitor="$6" q_sec=""
-    local q_mon="$(printf '%q' "$monitor")"
-    local q_res="$(printf '%q' "$resolution")"
-    local q_rate="$(printf '%q' "$refresh_rate")"
+    local q_mon q_res q_rate
+    q_mon="$(printf '%q' "$monitor")"
+    q_res="$(printf '%q' "$resolution")"
+    q_rate="$(printf '%q' "$refresh_rate")"
     cat > "$helper" <<'HELPER'
 #!/bin/bash
 case "$1" in
@@ -1061,9 +1057,9 @@ HELPER
 
 monitor_launcher_exec_plasma() {
     local helper="$1" exec_base="$2" monitor="$3" secondary_monitor="$6"
-    local mode_id="$7" q_sec=""
-    local q_mon="$(printf '%q' "$monitor")"
-    local q_mode_id="$(printf '%q' "$mode_id")"
+    local mode_id="$7" q_sec="" q_mon q_mode_id
+    q_mon="$(printf '%q' "$monitor")"
+    q_mode_id="$(printf '%q' "$mode_id")"
     cat > "$helper" <<'HELPER'
 #!/bin/bash
 set -u
@@ -1127,9 +1123,10 @@ HELPER
 monitor_launcher_exec_x11() {
     local helper="$1" exec_base="$2" monitor="$3" resolution="$4"
     local refresh_rate="$5" secondary_monitor="$6" q_sec=""
-    local q_mon="$(printf '%q' "$monitor")"
-    local q_res="$(printf '%q' "$resolution")"
-    local q_rate="$(printf '%q' "$refresh_rate")"
+    local q_mon q_res q_rate
+    q_mon="$(printf '%q' "$monitor")"
+    q_res="$(printf '%q' "$resolution")"
+    q_rate="$(printf '%q' "$refresh_rate")"
     cat > "$helper" <<'HELPER'
 #!/bin/bash
 case "$1" in
@@ -1173,14 +1170,9 @@ monitor_backend_call() {
     local operation="$1"
     shift
     local backend
-    case "$SESSION_TYPE" in
-        hyprland) backend="hyprland" ;;
-        plasma-wayland) backend="plasma" ;;
-        x11) backend="x11" ;;
-        *) return 1 ;;
-    esac
+    backend="$(monitor_backend_name)" || return 1
     case "$operation" in
-        list|description|exists|resolution|rate|mode_id|launcher_exec) ;;
+        list|description|exists|resolution|rate|mode_id|launcher_exec|ready|readiness_hint|dependency_commands) ;;
         *) return 2 ;;
     esac
     local handler="monitor_${operation}_${backend}"
@@ -1401,13 +1393,7 @@ page_monitor() {
 
     if ! monitor_backend_ready; then
         warn "The monitor backend for '$SESSION_TYPE' is not available in this session."
-        case "$SESSION_TYPE" in
-            plasma-wayland)
-                warn "KDE Plasma Wayland requires a working kscreen-doctor (${CMD_PKG[kscreen-doctor]:-libkscreen})."
-                ;;
-            hyprland) warn "Hyprland monitor management requires a working hyprctl connection." ;;
-            x11) warn "X11 monitor management requires a working xrandr connection." ;;
-        esac
+        warn "$(monitor_backend_call readiness_hint)"
         warn "Monitor configuration will be skipped. Install/fix the backend and re-run the installer to enable it."
         disable_monitor_management
         page_footer
@@ -1440,16 +1426,13 @@ page_monitor() {
     fi
 
     if [ -z "$SECONDARY_MONITOR" ]; then
-        local others="$(monitor_backend_call list | grep -Fxv -- "$MONITOR" || true)"
+        local others
+        others="$(monitor_backend_call list | grep -Fxv -- "$MONITOR" || true)"
         if [ -n "$others" ]; then
             echo ""
             echo -e "  Other connected monitors: ${BLD}$(echo "$others" | tr '\n' ' ')${RST}"
             warn "Multi-monitor setups can cause incorrect framerate in IIDX."
-            case "$SESSION_TYPE" in
-                hyprland|plasma-wayland|x11)
-                    warn "The secondary monitor will be disabled while the game runs."
-                    ;;
-            esac
+            warn "The secondary monitor will be disabled while the game runs."
             echo ""
             local ret=0
             confirm "Disable secondary monitor during gameplay?" "y" || ret=$?
@@ -1473,7 +1456,8 @@ page_monitor() {
 
     if [ -z "$GAME_RATE" ]; then
         echo ""
-        local detected_rate="$(monitor_backend_call rate "$MONITOR")"
+        local detected_rate
+        detected_rate="$(monitor_backend_call rate "$MONITOR")"
         log "Current refresh rate on $MONITOR: ${detected_rate:-unknown}hz"
         log "IIDX typically requires 120hz (60hz for some dumps/cabinets). The launcher will switch the primary monitor rate on every launch."
         echo ""
@@ -1483,7 +1467,8 @@ page_monitor() {
     fi
 
     if [ -z "$GAME_RES" ]; then
-        local detected_res="$(monitor_backend_call resolution "$MONITOR")"
+        local detected_res
+        detected_res="$(monitor_backend_call resolution "$MONITOR")"
         if [ -n "$detected_res" ]; then
             GAME_RES="$detected_res"
             success "Detected resolution: $GAME_RES"
@@ -1495,8 +1480,7 @@ page_monitor() {
         success "Resolution: $GAME_RES"
     fi
 
-    if [ "$SESSION_TYPE" = "plasma-wayland" ]; then
-        GAME_MODE_ID="$(monitor_backend_call mode_id "$MONITOR" "$GAME_RES" "$GAME_RATE")"
+    if GAME_MODE_ID="$(monitor_backend_call mode_id "$MONITOR" "$GAME_RES" "$GAME_RATE" 2>/dev/null)"; then
         [ -n "$GAME_MODE_ID" ] || \
             die "KScreen has no ${GAME_RES}@${GAME_RATE}Hz mode for '$MONITOR'. Choose a supported resolution/rate."
         success "KScreen mode: $GAME_MODE_ID (${GAME_RES}@${GAME_RATE}hz)"
@@ -1932,10 +1916,17 @@ page_deps() {
     draw_header 6
     echo -e "  Checking required packages...\n"
 
+    local monitor_cmds=()
+    local monitor_cmd
+    while IFS= read -r monitor_cmd; do
+        [ -n "$monitor_cmd" ] && monitor_cmds+=("$monitor_cmd")
+    done < <(monitor_backend_call dependency_commands || true)
+
     if [ -z "$PKG_MGR" ] || [ "$PKG_MGR" = "unknown" ]; then
         local manual="git, wget, curl, sha512sum, tar, jq, patch, make, gcc, cmake, pkg-config, winebuild"
-        [ "$SESSION_TYPE" = "x11" ] && manual+=", xrandr"
-        [ "$SESSION_TYPE" = "plasma-wayland" ] && [ "$MONITOR_MGMT" = "1" ] && manual+=", kscreen-doctor"
+        for monitor_cmd in "${monitor_cmds[@]}"; do
+            manual+=", $monitor_cmd"
+        done
         warn "No supported package manager detected - skipping package checks."
         warn "Install required packages manually: $manual, pipewire, ffmpeg"
         page_footer
@@ -1951,8 +1942,7 @@ page_deps() {
         pacman) check_cmds+=(cmake pkg-config winebuild winegcc) ;;
         xbps) check_cmds+=(cmake pkg-config winebuild winegcc wpctl) ;;
     esac
-    [ "$SESSION_TYPE" = "x11" ] && check_cmds+=(xrandr)
-    [ "$SESSION_TYPE" = "plasma-wayland" ] && [ "$MONITOR_MGMT" = "1" ] && check_cmds+=(kscreen-doctor)
+    check_cmds+=("${monitor_cmds[@]}")
     for cmd in "${check_cmds[@]}"; do
         if command -v "$cmd" &>/dev/null; then
             success "$cmd"
@@ -2500,7 +2490,8 @@ EOF
         return
     fi
 
-    local q_mon="$(printf '%q' "$MONITOR")"
+    local q_mon
+    q_mon="$(printf '%q' "$MONITOR")"
     local exec_game
     local helper="$AUTOMIZATION_DIR/helper/iidx-mon-state.sh"
     local launch_mode="${GAME_MODE_ID:-${GAME_RES}@${GAME_RATE}}"
