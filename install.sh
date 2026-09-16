@@ -746,7 +746,9 @@ while [[ $# -gt 0 ]]; do
         --proton-ver)         PROTON_VER="$2";            shift 2 ;;
         --rate)               GAME_RATE="$2"; MONITOR_MGMT=1; shift 2 ;;
         --icon)               ICON_SOURCE="$2";            shift 2 ;;
+        --steam-home)         STEAM_HOME="$2";             shift 2 ;;
         --asphyxia-url)       ASPHYXIA_URL="$2";          shift 2 ;;
+        --asphyxia-pcbid)     ASPHYXIA_PCBID="$2";         shift 2 ;;
         --uninstall)          UNINSTALL=1;                shift   ;;
         --yes|-y)             AUTO_YES=1;                 shift   ;;
         -h|--help)            usage ;;
