@@ -897,12 +897,6 @@ hyprland_monitor_resolution() {
 hyprland_monitor_rate() {
     hyprctl monitors all 2>/dev/null | grep -A1 "^Monitor $1 " | tail -1 | grep -oP '@\K[\d.]+' || true
 }
-monitor_disable_hyprland() {
-    hyprctl keyword monitor "$1,disable"
-}
-monitor_enable_hyprland() {
-    hyprctl keyword monitor "$1,preferred,auto,1"
-}
 monitor_list_hyprland() {
     list_monitors_hyprland
 }
@@ -918,10 +912,6 @@ monitor_resolution_hyprland() {
 monitor_rate_hyprland() {
     hyprland_monitor_rate "$1"
 }
-monitor_mode_id_hyprland() {
-    printf ''
-}
-
 ## KDE Plasma Wayland monitor helpers (KScreen/KWin). The human-readable
 ## output is used here because jq is installed later on the dependency page.
 refresh_kscreen_output() {
@@ -934,9 +924,6 @@ kscreen_output_text() {
     else
         kscreen-doctor -o 2>/dev/null | sed $'s/\033\[[0-9;]*m//g'
     fi
-}
-kscreen_json() {
-    kscreen-doctor --json 2>/dev/null
 }
 list_monitors_plasma() {
     kscreen_output_text | awk '
@@ -1032,10 +1019,6 @@ monitor_resolution_x11() {
 monitor_rate_x11() {
     detect_rate "$1"
 }
-monitor_mode_id_x11() {
-    printf ''
-}
-
 monitor_launcher_exec_hyprland() {
     local helper="$1" exec_base="$2" monitor="$3" resolution="$4"
     local refresh_rate="$5" secondary_monitor="$6" q_sec=""
