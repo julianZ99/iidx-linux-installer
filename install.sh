@@ -286,7 +286,7 @@ init_pkg_maps() {
         apt)
             CMD_PKG=(
                 [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
-                [jq]="jq" [patch]="patch" [curl]="curl"
+                [jq]="jq" [patch]="patch" [curl]="curl" [sha512sum]="coreutils"
                 [xrandr]="x11-xserver-utils"
                 [pipewire]="pipewire" [ffmpeg]="ffmpeg"
                 [pw-metadata]="pipewire"
@@ -316,7 +316,7 @@ init_pkg_maps() {
         dnf)
             CMD_PKG=(
                 [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
-                [jq]="jq" [patch]="patch" [curl]="curl"
+                [jq]="jq" [patch]="patch" [curl]="curl" [sha512sum]="coreutils"
                 [xrandr]="xorg-x11-xrandr"
                 [pipewire]="pipewire" [ffmpeg]="ffmpeg"
                 [pw-metadata]="pipewire"
@@ -346,7 +346,7 @@ init_pkg_maps() {
         xbps)
             CMD_PKG=(
                 [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
-                [jq]="jq" [patch]="patch" [curl]="curl" [cmake]="cmake"
+                [jq]="jq" [patch]="patch" [curl]="curl" [sha512sum]="coreutils" [cmake]="cmake"
                 [pkg-config]="pkg-config" [winebuild]="wine-tools" [winegcc]="wine-tools"
                 [xrandr]="xrandr" [pipewire]="pipewire" [ffmpeg]="ffmpeg"
                 [pw-metadata]="pipewire" [wpctl]="wireplumber"
@@ -377,7 +377,7 @@ init_pkg_maps() {
         pacman|*)
             CMD_PKG=(
                 [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
-                [jq]="jq" [patch]="patch" [curl]="curl" [cmake]="cmake"
+                [jq]="jq" [patch]="patch" [curl]="curl" [sha512sum]="coreutils" [cmake]="cmake"
                 [pkg-config]="pkgconf" [winebuild]="wine" [winegcc]="wine"
                 [xrandr]="xorg-xrandr"
                 [pipewire]="pipewire" [ffmpeg]="ffmpeg"
@@ -1786,7 +1786,7 @@ page_deps() {
     echo -e "  Checking required packages...\n"
 
     if [ -z "$PKG_MGR" ] || [ "$PKG_MGR" = "unknown" ]; then
-        local manual="git, wget, curl, tar, jq, patch, make, gcc, cmake, pkg-config, winebuild"
+        local manual="git, wget, curl, sha512sum, tar, jq, patch, make, gcc, cmake, pkg-config, winebuild"
         [ "$SESSION_TYPE" = "x11" ] && manual+=", xrandr"
         [ "$SESSION_TYPE" = "plasma-wayland" ] && [ "$MONITOR_MGMT" = "1" ] && manual+=", kscreen-doctor"
         warn "No supported package manager detected - skipping package checks."
@@ -1799,7 +1799,7 @@ page_deps() {
     local missing_cmds=()
     local missing_pkgs=()
 
-    local check_cmds=(git wget tar make gcc jq patch curl pipewire ffmpeg pw-metadata)
+    local check_cmds=(git wget tar make gcc jq patch curl sha512sum pipewire ffmpeg pw-metadata)
     case "$PKG_MGR" in
         pacman) check_cmds+=(cmake pkg-config winebuild winegcc) ;;
         xbps) check_cmds+=(cmake pkg-config winebuild winegcc wpctl) ;;
@@ -1998,16 +1998,28 @@ page_proton() {
 
     local proton_dest="$STEAM_ROOT/steamapps/common/$PROTON_DIR"
     local proton_tag="GE-Proton${PROTON_VER//./-}"
+    local proton_archive="$WORK_DIR/${proton_tag}.tar.gz"
+    local proton_checksum="$WORK_DIR/${proton_tag}.sha512sum"
 
     check_disk_space "$WORK_DIR" 1000 "temp dir"
     check_disk_space "$STEAM_ROOT" 3000 "Steam root"
 
     download_file "Proton-GE $proton_tag" \
         "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${proton_tag}/${proton_tag}.tar.gz" \
-        "$WORK_DIR/proton-ge.tar.gz"
+        "$proton_archive"
+    download_file "Proton-GE checksum" \
+        "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/${proton_tag}/${proton_tag}.sha512sum" \
+        "$proton_checksum"
+
+    if ! ui_run_with_spinner "Verifying Proton-GE SHA-512 checksum" \
+        bash -c 'cd "$1" && sha512sum -c "$2"' _ \
+            "$WORK_DIR" "${proton_tag}.sha512sum"; then
+        die "Proton-GE checksum verification failed; archive will not be extracted."
+    fi
+    success "Proton-GE checksum verified"
 
     ui_run_with_spinner "Extracting Proton-GE" \
-        tar -xf "$WORK_DIR/proton-ge.tar.gz" -C "$WORK_DIR"
+        tar -xf "$proton_archive" -C "$WORK_DIR"
     mv "$WORK_DIR/$proton_tag" "$WORK_DIR/proton-ge"
 
     log "Applying patches..."
