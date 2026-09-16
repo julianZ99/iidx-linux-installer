@@ -47,7 +47,7 @@ DISTRO_ID=""
 DISTRO_NAME=""
 PKG_MGR=""
 PKG_QUERY=""
-PKG_INSTALL=""
+PKG_INSTALL=()
 PKG_INSTALL_OPTS=()
 VOID_LIBC=""
 
@@ -201,25 +201,25 @@ detect_distro() {
         arch)
             PKG_MGR="pacman"
             PKG_QUERY="pacman -Q"
-            PKG_INSTALL="pacman -S"
+            PKG_INSTALL=(pacman -S)
             PKG_INSTALL_OPTS=(--needed)
             ;;
         debian|ubuntu)
             PKG_MGR="apt"
             PKG_QUERY="dpkg -l"
-            PKG_INSTALL="apt install"
+            PKG_INSTALL=(apt install)
             PKG_INSTALL_OPTS=( )
             ;;
         fedora)
             PKG_MGR="dnf"
             PKG_QUERY="rpm -q"
-            PKG_INSTALL="dnf install"
+            PKG_INSTALL=(dnf install)
             PKG_INSTALL_OPTS=( )
             ;;
         void)
             PKG_MGR="xbps"
             PKG_QUERY="xbps-query -p pkgver"
-            PKG_INSTALL="xbps-install -S"
+            PKG_INSTALL=(xbps-install -S)
             PKG_INSTALL_OPTS=( )
             ;;
         *)
@@ -227,27 +227,27 @@ detect_distro() {
             if command -v pacman &>/dev/null; then
                 PKG_MGR="pacman"
                 PKG_QUERY="pacman -Q"
-                PKG_INSTALL="pacman -S"
+                PKG_INSTALL=(pacman -S)
                 PKG_INSTALL_OPTS=(--needed)
             elif command -v apt &>/dev/null; then
                 PKG_MGR="apt"
                 PKG_QUERY="dpkg -l"
-                PKG_INSTALL="apt install"
+                PKG_INSTALL=(apt install)
                 PKG_INSTALL_OPTS=( )
             elif command -v dnf &>/dev/null; then
                 PKG_MGR="dnf"
                 PKG_QUERY="rpm -q"
-                PKG_INSTALL="dnf install"
+                PKG_INSTALL=(dnf install)
                 PKG_INSTALL_OPTS=( )
             elif command -v xbps-install &>/dev/null && command -v xbps-query &>/dev/null; then
                 PKG_MGR="xbps"
                 PKG_QUERY="xbps-query -p pkgver"
-                PKG_INSTALL="xbps-install -S"
+                PKG_INSTALL=(xbps-install -S)
                 PKG_INSTALL_OPTS=( )
             else
                 PKG_MGR="unknown"
                 PKG_QUERY=""
-                PKG_INSTALL=""
+                PKG_INSTALL=()
             fi
             ;;
     esac
@@ -1771,7 +1771,7 @@ verify_wine_deps() {
         if [ $ret -eq 0 ]; then
             local install_opts=( "${PKG_INSTALL_OPTS[@]}" )
             [ "$AUTO_YES" = "1" ] && install_opts+=("-y")
-            sudo $PKG_INSTALL "${install_opts[@]}" "${missing[@]}"
+            sudo "${PKG_INSTALL[@]}" "${install_opts[@]}" "${missing[@]}"
             success "32-bit libraries installed"
         elif [ $ret -eq 2 ]; then
             pop_page; return
@@ -1837,7 +1837,7 @@ page_deps() {
         if [ $ret -eq 0 ]; then
             local install_opts=( "${PKG_INSTALL_OPTS[@]}" )
             [ "$AUTO_YES" = "1" ] && install_opts+=("-y")
-            sudo $PKG_INSTALL "${install_opts[@]}" "${all_missing[@]}"
+            sudo "${PKG_INSTALL[@]}" "${install_opts[@]}" "${all_missing[@]}"
             success "Packages installed"
             if [ "$PKG_MGR" != "xbps" ] && \
                { [[ " ${all_missing[*]} " == *"pipewire"* ]] || [[ " ${all_missing[*]} " == *"wireplumber"* ]]; }; then
