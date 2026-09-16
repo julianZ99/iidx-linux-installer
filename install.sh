@@ -29,6 +29,8 @@ DISTRO_NAME=""
 PKG_MGR=""
 PKG_QUERY=""
 PKG_INSTALL=""
+PKG_INSTALL_OPTS=()
+VOID_LIBC=""
 
 ## Pagination state
 PAGE_NAMES=(
@@ -63,7 +65,9 @@ cleanup() {
     fi
     exit "$rc"
 }
-trap cleanup EXIT
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    trap cleanup EXIT
+fi
 
 usage() {
     cat <<EOF
@@ -117,6 +121,7 @@ sanitize_str() {
 
 preflight_check() {
     detect_distro
+    [ "$DISTRO_ID" = "void" ] && validate_void_platform
     init_pkg_maps
 
     log "Distro: ${DISTRO_NAME} (${DISTRO_ID}) - package manager: ${PKG_MGR:-none}"
@@ -127,8 +132,9 @@ preflight_check() {
         confirm "Continue anyway?" "n" || die "Aborting - unsupported distro"
     fi
 
-    local required=(git wget curl tar jq patch make gcc)
-    [ "$SESSION_TYPE" = "x11" ] && required+=(xrandr)
+    # curl is needed before the dependency page to discover release versions.
+    # The remaining build/runtime commands are installed by page_deps().
+    local required=(curl)
     local missing=()
     for cmd in "${required[@]}"; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
@@ -161,7 +167,10 @@ check_disk_space() {
 }
 
 detect_distro() {
-    [ -f /etc/os-release ] && . /etc/os-release
+    local os_release="${IIDX_OS_RELEASE_FILE:-/etc/os-release}"
+    # Testable path; defaults to /etc/os-release.
+    # shellcheck disable=SC1090
+    [ -f "$os_release" ] && . "$os_release"
     DISTRO_ID="${ID:-unknown}"
     DISTRO_NAME="${NAME:-$DISTRO_ID}"
 
@@ -184,6 +193,12 @@ detect_distro() {
             PKG_INSTALL="dnf install"
             PKG_INSTALL_OPTS=( )
             ;;
+        void)
+            PKG_MGR="xbps"
+            PKG_QUERY="xbps-query -p pkgver"
+            PKG_INSTALL="xbps-install -S"
+            PKG_INSTALL_OPTS=( )
+            ;;
         *)
             # Fallback: detect by package manager binary
             if command -v pacman &>/dev/null; then
@@ -201,11 +216,43 @@ detect_distro() {
                 PKG_QUERY="rpm -q"
                 PKG_INSTALL="dnf install"
                 PKG_INSTALL_OPTS=( )
+            elif command -v xbps-install &>/dev/null && command -v xbps-query &>/dev/null; then
+                PKG_MGR="xbps"
+                PKG_QUERY="xbps-query -p pkgver"
+                PKG_INSTALL="xbps-install -S"
+                PKG_INSTALL_OPTS=( )
             else
                 PKG_MGR="unknown"
                 PKG_QUERY=""
                 PKG_INSTALL=""
             fi
+            ;;
+    esac
+}
+
+validate_void_platform() {
+    local machine="${IIDX_MACHINE:-$(uname -m)}"
+    if [ "$machine" != "x86_64" ]; then
+        die "Void Linux support requires x86_64, detected: $machine"
+    fi
+
+    if [ -n "${IIDX_LIBC:-}" ]; then
+        VOID_LIBC="$IIDX_LIBC"
+    elif compgen -G '/lib/ld-musl-*.so.1' >/dev/null 2>&1; then
+        VOID_LIBC="musl"
+    elif getconf GNU_LIBC_VERSION >/dev/null 2>&1; then
+        VOID_LIBC="glibc"
+    else
+        VOID_LIBC="unknown"
+    fi
+
+    case "$VOID_LIBC" in
+        glibc) success "Void platform: x86_64 glibc" ;;
+        musl)
+            die "Void musl is not supported: Steam/Proton and Void multilib require x86_64 glibc."
+            ;;
+        *)
+            die "Could not verify glibc on Void Linux; refusing to configure Steam/Proton multilib."
             ;;
     esac
 }
@@ -273,13 +320,44 @@ init_pkg_maps() {
                 [mesa-dri-drivers]="mesa-dri-drivers.i686"
             )
             ;;
+        xbps)
+            CMD_PKG=(
+                [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
+                [jq]="jq" [patch]="patch" [curl]="curl" [cmake]="cmake"
+                [pkg-config]="pkg-config" [winebuild]="wine-tools" [winegcc]="wine-tools"
+                [xrandr]="xrandr" [pipewire]="pipewire" [ffmpeg]="ffmpeg"
+                [pw-metadata]="pipewire" [wpctl]="wireplumber"
+                [kscreen-doctor]="libkf6screen"
+            )
+            PKG_CHECK=(
+                [wireplumber]="wireplumber"
+                [alsa-pipewire]="alsa-pipewire"
+                [gstreamer1-pipewire]="gstreamer1-pipewire"
+                [pipewire-devel]="pipewire-devel"
+                [ffmpeg-devel]="ffmpeg-devel"
+            )
+            WINE_DEPS=(
+                [gnutls-32bit]="gnutls-32bit"
+                [libldap-32bit]="libldap-32bit"
+                [sqlite-32bit]="sqlite-32bit"
+                [libpulseaudio-32bit]="libpulseaudio-32bit"
+                [alsa-plugins-32bit]="alsa-plugins-32bit"
+                [mpg123-32bit]="mpg123-32bit"
+                [lcms2-32bit]="lcms2-32bit"
+                [libjpeg-turbo-32bit]="libjpeg-turbo-32bit"
+                [freetype-32bit]="freetype-32bit"
+                [dbus-libs-32bit]="dbus-libs-32bit"
+                [vulkan-loader-32bit]="vulkan-loader-32bit"
+            )
+            ;;
         pacman|*)
             CMD_PKG=(
                 [git]="git" [wget]="wget" [tar]="tar" [make]="make" [gcc]="gcc"
-                [jq]="jq" [patch]="patch" [curl]="curl"
+                [jq]="jq" [patch]="patch" [curl]="curl" [cmake]="cmake"
+                [pkg-config]="pkgconf" [winebuild]="wine" [winegcc]="wine"
                 [xrandr]="xorg-xrandr"
                 [pipewire]="pipewire" [ffmpeg]="ffmpeg"
-                [pw-metadata]="pipewire"
+                [pw-metadata]="pipewire" [kscreen-doctor]="libkscreen"
             )
             PKG_CHECK=(
                 [pipewire-pulse]="pipewire-pulse"
@@ -287,6 +365,7 @@ init_pkg_maps() {
                 [pipewire-alsa]="pipewire-alsa"
                 [wireplumber]="wireplumber"
                 [gst-plugin-pipewire]="gst-plugin-pipewire"
+                [libpipewire]="libpipewire"
             )
             WINE_DEPS=(
                 [lib32-gnutls]="lib32-gnutls"
@@ -304,7 +383,12 @@ init_pkg_maps() {
             )
             ;;
     esac
-    [ "$SESSION_TYPE" != "x11" ] && unset CMD_PKG[xrandr]
+    if [ "$SESSION_TYPE" != "x11" ]; then
+        unset 'CMD_PKG[xrandr]'
+    fi
+    if [ "$SESSION_TYPE" != "plasma-wayland" ]; then
+        unset 'CMD_PKG[kscreen-doctor]'
+    fi
 }
 
 ##
@@ -489,10 +573,12 @@ SPICE_DATE=""
 PROTON_VER="8.32"
 GAME_RATE=""
 GAME_RES=""
+GAME_MODE_ID=""
 ASPHYXIA_URL=""
 ASPHYXIA_PCBID=""
 AUTO_YES=0
 SESSION_TYPE=""
+KSCREEN_OUTPUT_CACHE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -581,17 +667,66 @@ detect_rate() {
 }
 
 detect_compositor() {
-    local stype="${XDG_SESSION_TYPE:-x11}"
+    local stype="${XDG_SESSION_TYPE:-}"
+    local desktop="${XDG_CURRENT_DESKTOP:-}:${DESKTOP_SESSION:-}"
+
+    if [ -z "$stype" ]; then
+        if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+            stype="wayland"
+        elif [ -n "${DISPLAY:-}" ]; then
+            stype="x11"
+        else
+            stype="unknown"
+        fi
+    fi
+
     case "$stype" in
         wayland)
+            if [[ "${desktop,,}" == *kde* ]] || [[ "${desktop,,}" == *plasma* ]] || \
+               [ "${KDE_FULL_SESSION:-}" = "true" ]; then
+                echo "plasma-wayland"
+                return
+            fi
             if command -v hyprctl &>/dev/null && hyprctl monitors &>/dev/null 2>&1; then
                 echo "hyprland"
                 return
             fi
             # future: swaymsg, niri msg
             echo "wayland-unknown" ;;
-        *) echo "x11" ;;
+        x11) echo "x11" ;;
+        *) echo "session-unsupported" ;;
     esac
+}
+
+monitor_backend_supported() {
+    case "$SESSION_TYPE" in
+        x11|hyprland|plasma-wayland) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+monitor_backend_ready() {
+    case "$SESSION_TYPE" in
+        x11)
+            command -v xrandr &>/dev/null && xrandr --query &>/dev/null
+            ;;
+        hyprland)
+            command -v hyprctl &>/dev/null && hyprctl monitors &>/dev/null
+            ;;
+        plasma-wayland)
+            command -v kscreen-doctor &>/dev/null && refresh_kscreen_output
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+disable_monitor_management() {
+    MONITOR_MGMT=0
+    MONITOR=""
+    SECONDARY_MONITOR=""
+    GAME_RATE=""
+    GAME_RES=""
+    GAME_MODE_ID=""
 }
 
 ## Hyprland-specific monitor helpers
@@ -609,6 +744,89 @@ monitor_disable_hyprland() {
 }
 monitor_enable_hyprland() {
     hyprctl keyword monitor "$1,preferred,auto,1"
+}
+
+## KDE Plasma Wayland monitor helpers (KScreen/KWin). The human-readable
+## output is used here because jq is installed later on the dependency page.
+refresh_kscreen_output() {
+    KSCREEN_OUTPUT_CACHE="$(kscreen-doctor -o 2>/dev/null | sed $'s/\033\[[0-9;]*m//g')"
+    grep -q '^Output:' <<< "$KSCREEN_OUTPUT_CACHE"
+}
+kscreen_output_text() {
+    if [ -n "$KSCREEN_OUTPUT_CACHE" ]; then
+        printf '%s\n' "$KSCREEN_OUTPUT_CACHE"
+    else
+        kscreen-doctor -o 2>/dev/null | sed $'s/\033\[[0-9;]*m//g'
+    fi
+}
+kscreen_json() {
+    kscreen-doctor --json 2>/dev/null
+}
+list_monitors_plasma() {
+    kscreen_output_text | awk '
+        function print_connected() {
+            if (name != "" && connected) print name
+        }
+        $1 == "Output:" {
+            print_connected()
+            name=$3
+            connected=0
+            next
+        }
+        $1 == "connected" { connected=1 }
+        END { print_connected() }
+    '
+}
+monitor_exists_plasma() {
+    list_monitors_plasma | grep -Fxq -- "$1"
+}
+monitor_mode_plasma() {
+    kscreen_output_text | awk -v name="$1" '
+        $1 == "Output:" { selected=($3 == name) }
+        selected && /Modes:/ && match($0, /[0-9]+x[0-9]+@[0-9.]+\*/) {
+            mode=substr($0, RSTART, RLENGTH - 1)
+            print mode
+            exit
+        }
+    '
+}
+monitor_res_plasma() {
+    local mode
+    mode="$(monitor_mode_plasma "$1")"
+    printf '%s\n' "${mode%@*}"
+}
+monitor_rate_plasma() {
+    local mode
+    mode="$(monitor_mode_plasma "$1")"
+    printf '%s\n' "${mode##*@}"
+}
+monitor_mode_id_plasma() {
+    local name="$1"
+    local resolution="$2"
+    local target_rate="$3"
+    kscreen_output_text | awk -v name="$name" -v resolution="$resolution" -v target="$target_rate" '
+        $1 == "Output:" { selected=($3 == name) }
+        selected && /Modes:/ {
+            best_diff=999999
+            best_id=""
+            for (i=1; i<=NF; i++) {
+                token=$i
+                sub(/[*!]+$/, "", token)
+                parts=split(token, pair, ":")
+                if (parts != 2) continue
+                split(pair[2], spec, "@")
+                if (spec[1] != resolution) continue
+                diff=spec[2] - target
+                if (diff < 0) diff=-diff
+                if (diff < best_diff) {
+                    best_diff=diff
+                    best_id=pair[1]
+                }
+            }
+            if (best_id != "" && best_diff <= 0.51) print best_id
+            exit
+        }
+    '
 }
 
 ##
@@ -646,8 +864,8 @@ page_intro() {
 "
     echo -e "  ${YLW}${BLD}Warnings and requirements:${RST}
 "
-    if [ "$PKG_MGR" != "pacman" ]; then
-        echo -e "    ${YLW}!${RST}  ${BLD}Arch Linux is the primary target${RST} - other distros may need manual steps"
+    if [ "$PKG_MGR" != "pacman" ] && [ "$PKG_MGR" != "xbps" ]; then
+        echo -e "    ${YLW}!${RST}  ${BLD}Arch and Void glibc are supported${RST} - other distros may need manual steps"
     fi
     echo -e "    ${YLW}!${RST}  You must have a ${BLD}legal dump${RST} of the game - this script does not provide one"
     echo -e "    ${YLW}!${RST}  ${BLD}Steam${RST} must be installed - the script uses its runtime and compatdata"
@@ -794,6 +1012,15 @@ page_monitor() {
     draw_header 3
     echo -e "  Configure your monitor setup.\n"
 
+    if ! monitor_backend_supported; then
+        warn "Session '$SESSION_TYPE' does not support automatic monitor management."
+        warn "Monitor configuration will be skipped and the launcher will not change displays."
+        disable_monitor_management
+        page_footer
+        read_nav || { pop_page; return; }
+        return
+    fi
+
     if [ -z "$MONITOR_MGMT" ]; then
         local ret=0
         confirm "Manage monitors automatically (resolution/rate switching, secondary disable)?" "n" || ret=$?
@@ -807,10 +1034,23 @@ page_monitor() {
     fi
 
     if [ "$MONITOR_MGMT" = "0" ]; then
-        MONITOR=""
-        SECONDARY_MONITOR=""
-        GAME_RATE=""
-        GAME_RES=""
+        disable_monitor_management
+        page_footer
+        read_nav || { pop_page; return; }
+        return
+    fi
+
+    if ! monitor_backend_ready; then
+        warn "The monitor backend for '$SESSION_TYPE' is not available in this session."
+        case "$SESSION_TYPE" in
+            plasma-wayland)
+                warn "KDE Plasma Wayland requires a working kscreen-doctor (${CMD_PKG[kscreen-doctor]:-libkscreen})."
+                ;;
+            hyprland) warn "Hyprland monitor management requires a working hyprctl connection." ;;
+            x11) warn "X11 monitor management requires a working xrandr connection." ;;
+        esac
+        warn "Monitor configuration will be skipped. Install/fix the backend and re-run the installer to enable it."
+        disable_monitor_management
         page_footer
         read_nav || { pop_page; return; }
         return
@@ -831,6 +1071,18 @@ page_monitor() {
                     MONITOR=""
                 done
                 ;;
+            plasma-wayland)
+                list_monitors_plasma | awk '{print "    " NR ") " $0}'
+                echo ""
+                while true; do
+                    prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
+                    if monitor_exists_plasma "$MONITOR"; then
+                        break
+                    fi
+                    warn "Monitor '$MONITOR' not found. Use a name from the list above."
+                    MONITOR=""
+                done
+                ;;
             x11)
                 xrandr 2>/dev/null | grep " connected" | awk '{print "    " NR ") " $1 " - " $3}'
                 echo ""
@@ -843,12 +1095,17 @@ page_monitor() {
                     MONITOR=""
                 done
                 ;;
-            *)
-                warn "Unknown session '$SESSION_TYPE' - cannot auto-detect monitors."
-                prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
-                ;;
         esac
     else
+        local monitor_valid=1
+        case "$SESSION_TYPE" in
+            plasma-wayland) monitor_exists_plasma "$MONITOR" || monitor_valid=0 ;;
+            hyprland) hyprctl monitors all 2>/dev/null | grep -q "^Monitor $MONITOR " || monitor_valid=0 ;;
+            x11) xrandr 2>/dev/null | grep -q "^$MONITOR " || monitor_valid=0 ;;
+        esac
+        if [ "$monitor_valid" = "0" ]; then
+            die "Primary monitor '$MONITOR' is not connected in the current $SESSION_TYPE session."
+        fi
         success "Primary monitor: $MONITOR"
     fi
 
@@ -857,6 +1114,9 @@ page_monitor() {
         case "$SESSION_TYPE" in
             hyprland)
                 others="$(list_monitors_hyprland | grep -v "^${MONITOR}$" || true)"
+                ;;
+            plasma-wayland)
+                others="$(list_monitors_plasma | grep -v "^${MONITOR}$" || true)"
                 ;;
             x11)
                 others="$(xrandr 2>/dev/null | grep " connected" | awk '{print $1}' | grep -v "^${MONITOR}$" || true)"
@@ -867,7 +1127,7 @@ page_monitor() {
             echo -e "  Other connected monitors: ${BLD}$(echo "$others" | tr '\n' ' ')${RST}"
             warn "Multi-monitor setups can cause incorrect framerate in IIDX."
             case "$SESSION_TYPE" in
-                hyprland|x11)
+                hyprland|plasma-wayland|x11)
                     warn "The secondary monitor will be disabled while the game runs."
                     ;;
             esac
@@ -880,7 +1140,21 @@ page_monitor() {
                 pop_page; return
             fi
         fi
-    else
+    fi
+
+    if [ -n "$SECONDARY_MONITOR" ]; then
+        if [ "$SECONDARY_MONITOR" = "$MONITOR" ]; then
+            die "Primary and secondary monitor cannot both be '$MONITOR'."
+        fi
+        local secondary_valid=1
+        case "$SESSION_TYPE" in
+            plasma-wayland) monitor_exists_plasma "$SECONDARY_MONITOR" || secondary_valid=0 ;;
+            hyprland) hyprctl monitors all 2>/dev/null | grep -q "^Monitor $SECONDARY_MONITOR " || secondary_valid=0 ;;
+            x11) xrandr 2>/dev/null | grep -q "^$SECONDARY_MONITOR " || secondary_valid=0 ;;
+        esac
+        if [ "$secondary_valid" = "0" ]; then
+            die "Secondary monitor '$SECONDARY_MONITOR' is not connected in the current $SESSION_TYPE session."
+        fi
         success "Secondary monitor: $SECONDARY_MONITOR (will be disabled)"
     fi
 
@@ -889,6 +1163,7 @@ page_monitor() {
         local detected_rate=""
         case "$SESSION_TYPE" in
             hyprland) detected_rate="$(monitor_rate_hyprland "$MONITOR")" ;;
+            plasma-wayland) detected_rate="$(monitor_rate_plasma "$MONITOR")" ;;
             x11)      detected_rate="$(detect_rate)" ;;
         esac
         log "Current refresh rate on $MONITOR: ${detected_rate:-unknown}hz"
@@ -903,6 +1178,7 @@ page_monitor() {
         local detected_res=""
         case "$SESSION_TYPE" in
             hyprland) detected_res="$(monitor_res_hyprland "$MONITOR")" ;;
+            plasma-wayland) detected_res="$(monitor_res_plasma "$MONITOR")" ;;
             x11)      detected_res="$(detect_resolution)" ;;
         esac
         if [ -n "$detected_res" ]; then
@@ -914,6 +1190,13 @@ page_monitor() {
         fi
     else
         success "Resolution: $GAME_RES"
+    fi
+
+    if [ "$SESSION_TYPE" = "plasma-wayland" ]; then
+        GAME_MODE_ID="$(monitor_mode_id_plasma "$MONITOR" "$GAME_RES" "$GAME_RATE")"
+        [ -n "$GAME_MODE_ID" ] || \
+            die "KScreen has no ${GAME_RES}@${GAME_RATE}Hz mode for '$MONITOR'. Choose a supported resolution/rate."
+        success "KScreen mode: $GAME_MODE_ID (${GAME_RES}@${GAME_RATE}hz)"
     fi
 
     page_footer
@@ -981,6 +1264,214 @@ page_summary() {
     read_nav || { pop_page; return; }
 }
 
+ensure_void_multilib() {
+    [ "$PKG_MGR" = "xbps" ] || return 0
+
+    if $PKG_QUERY void-repo-multilib &>/dev/null; then
+        success "Void multilib repository enabled"
+        return 0
+    fi
+
+    echo ""
+    warn "Void's multilib repository is required for Proton's 32-bit libraries."
+    local ret=0
+    confirm "Enable void-repo-multilib and refresh package indexes?" "y" || ret=$?
+    if [ $ret -eq 0 ]; then
+        local opts=(-Sy)
+        [ "$AUTO_YES" = "1" ] && opts+=(-y)
+        sudo xbps-install "${opts[@]}" void-repo-multilib
+        success "Void multilib repository enabled"
+    elif [ $ret -eq 2 ]; then
+        pop_page
+        return 1
+    else
+        die "Void multilib is required to install Proton's 32-bit libraries."
+    fi
+}
+
+detect_gpu_vendors() {
+    local vendor_file vendor
+    local found=()
+
+    if [ -n "${IIDX_GPU_VENDORS:-}" ]; then
+        local overridden="${IIDX_GPU_VENDORS//,/ }"
+        local override_vendors=()
+        read -r -a override_vendors <<< "$overridden"
+        printf '%s\n' "${override_vendors[@]}"
+        return 0
+    fi
+
+    for vendor_file in /sys/class/drm/card*/device/vendor; do
+        [ -r "$vendor_file" ] || continue
+        read -r vendor < "$vendor_file"
+        case "$vendor" in
+            0x1002) [[ " ${found[*]} " == *" amd "* ]] || found+=(amd) ;;
+            0x8086) [[ " ${found[*]} " == *" intel "* ]] || found+=(intel) ;;
+            0x10de) [[ " ${found[*]} " == *" nvidia "* ]] || found+=(nvidia) ;;
+        esac
+    done
+
+    printf '%s\n' "${found[@]}"
+}
+
+vulkan_package_pair_installed() {
+    $PKG_QUERY "$1" &>/dev/null && $PKG_QUERY "$2" &>/dev/null
+}
+
+validate_vulkan() {
+    case "$PKG_MGR" in
+        pacman|xbps) ;;
+        *) return 0 ;;
+    esac
+
+    echo ""
+    echo -e "  ${BLD}Checking Vulkan prerequisites for ${DISTRO_NAME}...${RST}"
+
+    local vulkan_missing=0
+    local loader64 loader32
+    if [ "$PKG_MGR" = "pacman" ]; then
+        loader64="vulkan-icd-loader"
+        loader32="lib32-vulkan-icd-loader"
+    else
+        loader64="vulkan-loader"
+        loader32="vulkan-loader-32bit"
+    fi
+
+    local pkg
+    for pkg in "$loader64" "$loader32"; do
+        if $PKG_QUERY "$pkg" &>/dev/null; then
+            success "$pkg"
+        else
+            warn "$pkg not installed"
+            vulkan_missing=1
+        fi
+    done
+
+    local vendors=()
+    mapfile -t vendors < <(detect_gpu_vendors)
+    if [ ${#vendors[@]} -eq 0 ]; then
+        warn "Could not detect the GPU vendor from /sys/class/drm."
+        warn "Verify that both the 64-bit and 32-bit Vulkan ICD for your GPU are installed."
+        vulkan_missing=1
+    fi
+
+    local vendor expected64 expected32 alternative64 alternative32
+    for vendor in "${vendors[@]}"; do
+        alternative64=""
+        alternative32=""
+        case "$vendor" in
+            amd)
+                if [ "$PKG_MGR" = "pacman" ]; then
+                    expected64="vulkan-radeon"
+                    expected32="lib32-vulkan-radeon"
+                else
+                    expected64="mesa-vulkan-radeon"
+                    expected32="mesa-vulkan-radeon-32bit"
+                fi
+                ;;
+            intel)
+                if [ "$PKG_MGR" = "pacman" ]; then
+                    expected64="vulkan-intel"
+                    expected32="lib32-vulkan-intel"
+                else
+                    expected64="mesa-vulkan-intel"
+                    expected32="mesa-vulkan-intel-32bit"
+                fi
+                ;;
+            nvidia)
+                if [ "$PKG_MGR" = "pacman" ]; then
+                    expected64="nvidia-utils"
+                    expected32="lib32-nvidia-utils"
+                    alternative64="vulkan-nouveau"
+                    alternative32="lib32-vulkan-nouveau"
+                else
+                    expected64="nvidia-libs"
+                    expected32="nvidia-libs-32bit"
+                    alternative64="mesa-vulkan-nouveau"
+                    alternative32="mesa-vulkan-nouveau-32bit"
+                fi
+                ;;
+        esac
+
+        if vulkan_package_pair_installed "$expected64" "$expected32" || \
+           { [ -n "$alternative64" ] && vulkan_package_pair_installed "$alternative64" "$alternative32"; }; then
+            success "$vendor Vulkan ICD (64-bit and 32-bit)"
+        else
+            warn "$vendor Vulkan ICD is incomplete. Suggested packages: $expected64 $expected32"
+            [ -n "$alternative64" ] && \
+                warn "Open-source alternative: $alternative64 $alternative32"
+            [ "$vendor" = "nvidia" ] && [ "$PKG_MGR" = "xbps" ] && \
+                warn "NVIDIA packages require void-repo-nonfree and void-repo-multilib-nonfree."
+            vulkan_missing=1
+        fi
+    done
+
+    if [ "$vulkan_missing" = "1" ]; then
+        echo ""
+        warn "Steam/Proton may fail without working 64-bit and 32-bit Vulkan drivers."
+        confirm "Continue despite the incomplete Vulkan prerequisites?" "n" || \
+            die "Install the suggested Vulkan packages and re-run the installer."
+    else
+        success "Vulkan prerequisites satisfied"
+    fi
+}
+
+validate_void_pipewire() {
+    [ "$PKG_MGR" = "xbps" ] || return 0
+
+    echo ""
+    echo -e "  ${BLD}Checking the Void PipeWire session...${RST}"
+    if wpctl status >/dev/null 2>&1 || pw-metadata -n settings 0 >/dev/null 2>&1; then
+        success "PipeWire and WirePlumber are active"
+        return 0
+    fi
+
+    warn "PipeWire is installed but is not active in this user session."
+    echo -e "  Void starts PipeWire through desktop autostart and configuration snippets, not systemd."
+    echo -e "  Follow: ${CYN}https://docs.voidlinux.org/config/media/pipewire.html${RST}"
+    echo -e "  Ensure WirePlumber and pipewire-pulse are enabled, then log out and back in."
+    confirm "Continue despite the inactive PipeWire session?" "n" || \
+        die "Configure/start PipeWire and re-run the installer."
+}
+
+verify_build_pkgconfig_modules() {
+    case "$PKG_MGR" in
+        pacman)
+            local pipewire_pkg="libpipewire"
+            local ffmpeg_pkg="ffmpeg"
+            ;;
+        xbps)
+            local pipewire_pkg="pipewire-devel"
+            local ffmpeg_pkg="ffmpeg-devel"
+            ;;
+        *) return 0 ;;
+    esac
+
+    echo ""
+    echo -e "  ${BLD}Checking bmsound_wine build interfaces...${RST}"
+
+    command -v pkg-config &>/dev/null || die "pkg-config is required to validate build interfaces."
+
+    local build_missing=0
+    if pkg-config --exists libpipewire-0.3 libspa-0.2; then
+        success "PipeWire development interfaces"
+    else
+        warn "Missing PipeWire development interfaces: libpipewire-0.3, libspa-0.2"
+        warn "Required package: $pipewire_pkg"
+        build_missing=1
+    fi
+
+    if pkg-config --exists libavformat libavcodec libavutil libswresample; then
+        success "FFmpeg development interfaces"
+    else
+        warn "Missing FFmpeg development interfaces: libavformat, libavcodec, libavutil, libswresample"
+        warn "Required package: $ffmpeg_pkg"
+        build_missing=1
+    fi
+
+    [ "$build_missing" = "0" ] || die "bmsound_wine build dependencies are incomplete."
+}
+
 verify_wine_deps() {
     if [ ${#WINE_DEPS[@]} -eq 0 ]; then
         echo ""
@@ -1033,6 +1524,8 @@ verify_wine_deps() {
         fi
     fi
 
+    ensure_void_multilib || return
+
     local missing=()
     for pkg in "${!WINE_DEPS[@]}"; do
         local pkgname="${WINE_DEPS[$pkg]}"
@@ -1050,7 +1543,7 @@ verify_wine_deps() {
         local ret=0
         confirm "Install missing libraries with $PKG_MGR?" "y" || ret=$?
         if [ $ret -eq 0 ]; then
-            local install_opts=( "${PKG_INSTALL_OPTS[@]:-}" )
+            local install_opts=( "${PKG_INSTALL_OPTS[@]}" )
             [ "$AUTO_YES" = "1" ] && install_opts+=("-y")
             sudo $PKG_INSTALL "${install_opts[@]}" "${missing[@]}"
             success "32-bit libraries installed"
@@ -1067,8 +1560,9 @@ page_deps() {
     echo -e "  Checking required packages...\n"
 
     if [ -z "$PKG_MGR" ] || [ "$PKG_MGR" = "unknown" ]; then
-        local manual="git, wget, curl, tar, jq, patch, make, gcc"
+        local manual="git, wget, curl, tar, jq, patch, make, gcc, cmake, pkg-config, winebuild"
         [ "$SESSION_TYPE" = "x11" ] && manual+=", xrandr"
+        [ "$SESSION_TYPE" = "plasma-wayland" ] && [ "$MONITOR_MGMT" = "1" ] && manual+=", kscreen-doctor"
         warn "No supported package manager detected - skipping package checks."
         warn "Install required packages manually: $manual, pipewire, ffmpeg"
         page_footer
@@ -1080,7 +1574,12 @@ page_deps() {
     local missing_pkgs=()
 
     local check_cmds=(git wget tar make gcc jq patch curl pipewire ffmpeg pw-metadata)
+    case "$PKG_MGR" in
+        pacman) check_cmds+=(cmake pkg-config winebuild winegcc) ;;
+        xbps) check_cmds+=(cmake pkg-config winebuild winegcc wpctl) ;;
+    esac
     [ "$SESSION_TYPE" = "x11" ] && check_cmds+=(xrandr)
+    [ "$SESSION_TYPE" = "plasma-wayland" ] && [ "$MONITOR_MGMT" = "1" ] && check_cmds+=(kscreen-doctor)
     for cmd in "${check_cmds[@]}"; do
         if command -v "$cmd" &>/dev/null; then
             success "$cmd"
@@ -1110,11 +1609,12 @@ page_deps() {
         local ret=0
         confirm "Install missing packages with $PKG_MGR?" "y" || ret=$?
         if [ $ret -eq 0 ]; then
-            local install_opts=( "${PKG_INSTALL_OPTS[@]:-}" )
+            local install_opts=( "${PKG_INSTALL_OPTS[@]}" )
             [ "$AUTO_YES" = "1" ] && install_opts+=("-y")
             sudo $PKG_INSTALL "${install_opts[@]}" "${all_missing[@]}"
             success "Packages installed"
-            if [[ " ${all_missing[*]} " == *"pipewire"* ]] || [[ " ${all_missing[*]} " == *"wireplumber"* ]]; then
+            if [ "$PKG_MGR" != "xbps" ] && \
+               { [[ " ${all_missing[*]} " == *"pipewire"* ]] || [[ " ${all_missing[*]} " == *"wireplumber"* ]]; }; then
                 log "Enabling pipewire services..."
                 systemctl --user enable --now pipewire pipewire-pulse wireplumber 2>/dev/null || true
                 success "pipewire services enabled"
@@ -1128,7 +1628,10 @@ page_deps() {
         success "All dependencies satisfied"
     fi
 
+    verify_build_pkgconfig_modules
     verify_wine_deps
+    validate_vulkan
+    validate_void_pipewire
 
     page_footer
     read_nav || { pop_page; return; }
@@ -1138,12 +1641,31 @@ page_groups() {
     draw_header 7
     echo -e "  Checking user group membership...\n"
 
+    if ! getent group games >/dev/null 2>&1; then
+        log "Creating required system group: games"
+        sudo groupadd --system games
+        success "Created group: games"
+    fi
+
     local current_groups
-    current_groups="$(groups "$USER")"
+    current_groups="$(id -nG "$USER")"
     local to_add=()
     local relogin_needed=0
+    local groups_to_check=(games input realtime audio)
 
-    for g in games input realtime audio; do
+    if [ "$DISTRO_ID" = "void" ] && [ -d /run/elogind ]; then
+        groups_to_check=(games input realtime)
+        log "elogind detected; direct membership in 'audio' is not required on Void."
+    fi
+
+    local g
+    for g in "${groups_to_check[@]}"; do
+        if ! getent group "$g" >/dev/null 2>&1; then
+            warn "Group not available: $g  (${GROUP_DESC[$g]})"
+            [ "$g" = "realtime" ] && \
+                warn "Low-latency scheduling requires an RT policy/limits setup; group membership alone is insufficient."
+            continue
+        fi
         if echo "$current_groups" | grep -qw "$g"; then
             success "In group: $g  (${GROUP_DESC[$g]})"
         else
@@ -1191,6 +1713,10 @@ page_groups() {
         warn "A relogin is required for group changes to take effect."
         warn "Controller input and audio may not work until you relogin."
         confirm "Continue installation anyway?" "y" || { echo "Relogin and re-run the script."; exit 0; }
+    fi
+
+    if getent group realtime >/dev/null 2>&1; then
+        warn "The realtime group only helps when matching PAM limits or another RT policy is configured."
     fi
 
     page_footer
@@ -1478,6 +2004,7 @@ EOF
     local exec_game
     local q_res="$(printf '%q' "$GAME_RES")"
     local q_rate="$(printf '%q' "$GAME_RATE")"
+    local q_mode_id="$(printf '%q' "${GAME_MODE_ID:-${GAME_RES}@${GAME_RATE}}")"
     local helper="$AUTOMIZATION_DIR/helper/iidx-mon-state.sh"
     case "$SESSION_TYPE" in
         hyprland)
@@ -1515,7 +2042,68 @@ HELPER
                 exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_mon"','"$q_res"'@'"$q_rate"',auto,1 && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
             fi
             ;;
-        *)
+        plasma-wayland)
+            cat > "$helper" <<'HELPER'
+#!/bin/bash
+set -u
+
+case "${1:-}" in
+    save)
+        state_file="$2"
+        kscreen-doctor --json > "$state_file"
+        jq -e '.outputs | type == "array"' "$state_file" >/dev/null
+        ;;
+    restore)
+        state_file="$2"
+        [ -s "$state_file" ] || exit 1
+        jq -e '.outputs | type == "array"' "$state_file" >/dev/null || exit 1
+        mapfile -t args < <(jq -r '
+            def rotation_name:
+                if . == 1 then "none"
+                elif . == 2 then "left"
+                elif . == 4 then "inverted"
+                elif . == 8 then "right"
+                elif . == 16 then "flipped"
+                elif . == 32 then "flipped90"
+                elif . == 64 then "flipped180"
+                elif . == 128 then "flipped270"
+                else "none"
+                end;
+            .outputs[] | select(.connected == true) |
+            .id as $id |
+            if (if has("enabled") then .enabled else true end) then
+                "output.\($id).enable",
+                (if (.currentModeId | tostring | length) > 0 then
+                    "output.\($id).mode.\(.currentModeId)"
+                 else empty end),
+                "output.\($id).position.\(.pos.x),\(.pos.y)",
+                "output.\($id).scale.\(.scale // 1)",
+                "output.\($id).rotation.\(.rotation | rotation_name)",
+                (if (.priority // 0) > 0 then
+                    "output.\($id).priority.\(.priority)"
+                 else empty end)
+            else
+                "output.\($id).disable"
+            end
+        ' "$state_file")
+        [ "${#args[@]}" -gt 0 ] && kscreen-doctor "${args[@]}"
+        ;;
+    *)
+        echo "Usage: $0 {save|restore} STATE_FILE" >&2
+        exit 2
+        ;;
+esac
+HELPER
+            chmod +x "$helper"
+
+            if [ -n "$SECONDARY_MONITOR" ]; then
+                local q_sec="$(printf '%q' "$SECONDARY_MONITOR")"
+                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); '"$helper"' save \"$f\" && kscreen-doctor output.'"$q_sec"'.disable output.'"$q_mon"'.enable output.'"$q_mon"'.mode.'"$q_mode_id"' output.'"$q_mon"'.priority.1 && '"$exec_base"'; '"$helper"' restore \"$f\" 2>/dev/null || true; rm -f \"$f\""'
+            else
+                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); '"$helper"' save \"$f\" && kscreen-doctor output.'"$q_mon"'.enable output.'"$q_mon"'.mode.'"$q_mode_id"' output.'"$q_mon"'.priority.1 && '"$exec_base"'; '"$helper"' restore \"$f\" 2>/dev/null || true; rm -f \"$f\""'
+            fi
+            ;;
+        x11)
             cat > "$helper" <<'HELPER'
 #!/bin/bash
 case "$1" in
@@ -1555,6 +2143,11 @@ HELPER
                 exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && xrandr --output '"$q_mon"' --mode '"$q_res"' --rate '"$q_rate"' && __GL_SYNC_DISPLAY_DEVICE='"$q_mon"' '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
             fi
             ;;
+        *)
+            warn "No safe monitor backend for '$SESSION_TYPE'; creating a direct launcher."
+            disable_monitor_management
+            exec_game="$exec_base"
+            ;;
     esac
 
     cat > "$HOME/.local/share/applications/iidx${GAME_STYLE}.desktop" <<EOF
@@ -1566,10 +2159,14 @@ Categories=Game;
 EOF
     success "iidx${GAME_STYLE}.desktop created"
 
+    local exec_cfg="$exec_base --cfg"
+    if [ "$MONITOR_MGMT" = "1" ]; then
+        exec_cfg="bash -c \"__GL_SYNC_DISPLAY_DEVICE=$q_mon $exec_base --cfg\""
+    fi
     cat > "$HOME/.local/share/applications/iidx${GAME_STYLE}-cfg.desktop" <<EOF
 [Desktop Entry]
 Name=Beatmania IIDX $GAME_STYLE (Config)
-Exec=bash -c "__GL_SYNC_DISPLAY_DEVICE=$q_mon $exec_base --cfg"
+Exec=$exec_cfg
 Type=Application
 Categories=Game;
 EOF
@@ -1849,9 +2446,11 @@ run_uninstaller() {
             echo -e "  ${GRN}✓${RST} User removed from groups"
         fi
 
-        if confirm "  Disable pipewire services?" "n"; then
+        if command -v systemctl >/dev/null 2>&1 && confirm "  Disable pipewire services?" "n"; then
             systemctl --user disable --now pipewire pipewire-pulse wireplumber 2>/dev/null || true
             echo -e "  ${GRN}✓${RST} Pipewire services disabled"
+        elif command -v xbps-install >/dev/null 2>&1; then
+            echo -e "  ${YLW}Void PipeWire autostart/configuration was not modified by this installer.${RST}"
         fi
 
         if type pacman &>/dev/null; then
@@ -1872,12 +2471,6 @@ run_uninstaller() {
     success "Uninstall complete."
     echo ""
 }
-
-## Early exit: uninstall mode
-if [ "$UNINSTALL" = "1" ]; then
-    run_uninstaller
-    exit 0
-fi
 
 ##
 ## Main - pagination loop
@@ -1922,4 +2515,10 @@ main() {
     done
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    if [ "$UNINSTALL" = "1" ]; then
+        run_uninstaller
+    else
+        main
+    fi
+fi
