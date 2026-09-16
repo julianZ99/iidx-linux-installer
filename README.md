@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="media/banner.png" alt="IIDX Linux Installer">
-</p>
-
 Automated (unofficial) installer for Beatmania IIDX on Linux with **spicetools**, **bmsound_wine** and **Proton-GE**.
 
 ## Requirements
@@ -70,7 +66,7 @@ When enabled, the `.desktop` entry uses a helper script (`iidx-mon-state.sh`) th
 
 When disabled, the game launches directly without any display changes.
 
-> **Refresh rate**: LDJ mode (`012`) normally targets 60 Hz, while TDJ/Lightning mode (`010`) normally targets 120 Hz. The game code and filenames may still use `LDJ` for either variant. You can set the display refresh rate with `--rate` or via the installer's monitor page. When monitor management is enabled, the desktop entry switches to that rate automatically on every launch. Use a different target only when the game DLL has deliberately been patched for another frame rate.
+> **Refresh rate**: LDJ mode (`012`) normally targets 60 Hz, while TDJ/Lightning mode (`010`) normally targets 120 Hz. The game code and filenames may still use `LDJ` for either variant. You can set the display refresh rate with `--rate` or during the display setup step. When monitor management is enabled, the desktop entry switches to that rate automatically on every launch. Use a different target only when the game DLL has deliberately been patched for another frame rate.
 
 If a secondary monitor is configured, it is also disabled during gameplay and re-enabled after:
 - **X11**: `xrandr --output <sec> --off`
@@ -170,7 +166,7 @@ The installer can configure the game to connect to an Asphyxia server:
 - `--asphyxia-url <URL>` - server URL (default: `http://127.0.0.1:1108/`)
 - `--asphyxia-pcbid <ID>` - cabinet ID for identification
 
-You can also enter these values interactively during the **Network** page of the wizard.
+You can also enter these values interactively during the network configuration step in **Setup**.
 
 With `--yes` (non-interactive), Asphyxia will be configured using the provided flags or the defaults above.
 

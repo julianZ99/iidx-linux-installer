@@ -54,20 +54,9 @@ VOID_LIBC=""
 ## Pagination state
 PAGE_NAMES=(
     "Welcome"
-    "Configuration"
-    "Steam"
-    "Monitor"
-    "Versions"
+    "Setup"
     "Summary"
-    "Dependencies"
-    "User Groups"
-    "Base Setup"
-    "Proton-GE"
-    "Binaries"
-    "Game Setup"
-    "Network"
-    "Verification"
-    "Launchers"
+    "Install"
     "Patches"
     "Done"
 )
@@ -75,6 +64,22 @@ TOTAL_PAGES=${#PAGE_NAMES[@]}
 
 ## Page history stack for back navigation
 PAGE_HISTORY=()
+UI_AUTONEXT=0
+UI_LOCK_BACK=0
+UI_MAIN_PAGE_OVERRIDE=""
+UI_ACTIVE_SUB_LABEL=""
+INSTALL_TASK_NAMES=(
+    "Dependencies"
+    "User groups"
+    "Base setup"
+    "Proton-GE"
+    "Audio and launcher binaries"
+    "Game files"
+    "Network configuration"
+    "Installation verification"
+    "Desktop launchers"
+)
+INSTALL_TASK_STATES=(pending pending pending pending pending pending pending pending pending)
 
 ## Cleanup on exit / interrupt
 cleanup() {
@@ -434,13 +439,27 @@ ui_center() {
 
 ui_phase() {
     local page_idx="$1"
-    if [ "$page_idx" -le 5 ]; then
-        echo "SETUP"
-    elif [ "$page_idx" -le 14 ]; then
-        echo "INSTALL"
-    else
-        echo "FINISH"
-    fi
+    case "$page_idx" in
+        0|1|2) echo "SETUP" ;;
+        3) echo "INSTALL" ;;
+        *) echo "FINISH" ;;
+    esac
+}
+
+ui_install_dashboard() {
+    [ "${UI_MAIN_PAGE_OVERRIDE:-}" = "3" ] || return 0
+    local i state icon color
+    for i in "${!INSTALL_TASK_NAMES[@]}"; do
+        state="${INSTALL_TASK_STATES[$i]:-pending}"
+        case "$state" in
+            done) icon='✓'; color="$GRN" ;;
+            running) icon='●'; color="$CYN" ;;
+            failed) icon='✗'; color="$RED" ;;
+            *) icon='·'; color="$BLU" ;;
+        esac
+        printf '  %b%s%b %s\n' "$color" "$icon" "$RST" "${INSTALL_TASK_NAMES[$i]}"
+    done
+    echo ""
 }
 
 ui_section() {
@@ -453,9 +472,13 @@ ui_kv() {
 }
 
 draw_header() {
-    local page_idx="$1"
+    local page_idx="${UI_MAIN_PAGE_OVERRIDE:-$1}"
     local page_name="${PAGE_NAMES[$page_idx]}"
+    if [ -n "${UI_ACTIVE_SUB_LABEL:-}" ]; then
+        page_name="$page_name · $UI_ACTIVE_SUB_LABEL"
+    fi
     local term_width
+    local i
     term_width="$(tput cols 2>/dev/null || echo 80)"
 
     [[ "$term_width" =~ ^[0-9]+$ ]] || term_width=80
@@ -463,36 +486,21 @@ draw_header() {
 
     local ui_width="$term_width"
     [ "$ui_width" -gt 100 ] && ui_width=100
-    [ "$page_idx" -eq 0 ] && [ "$term_width" -ge 109 ] && ui_width=109
 
     [ -t 1 ] && clear
 
     _CURRENT_TERM_WIDTH="$term_width"
     _CURRENT_UI_WIDTH="$ui_width"
 
-    # Keep the large logo for the welcome page only. On narrower terminals a
-    # compact title avoids wrapping and consuming most of the viewport.
-    if [ "$page_idx" -eq 0 ] && [ "$term_width" -ge 109 ]; then
-        echo -e "${MAG}${BLD}"
-        echo "▄█ ▄█ ██▄      ▄      █    ▄█    ▄     ▄       ▄      ▄█    ▄      ▄▄▄▄▄      ▄▄▄▄▀ ██   █     ▄███▄   █▄▄▄▄ "
-        echo "██ ██ █  █ ▀▄   █     █    ██     █     █  ▀▄   █     ██     █    █     ▀▄ ▀▀▀ █    █ █  █     █▀   ▀  █  ▄▀ "
-        echo "██ ██ █   █  █ ▀      █    ██ ██   █ █   █   █ ▀      ██ ██   █ ▄  ▀▀▀▀▄       █    █▄▄█ █     ██▄▄    █▀▀▌  "
-        echo "▐█ ▐█ █  █  ▄ █       ███▄ ▐█ █ █  █ █   █  ▄ █       ▐█ █ █  █  ▀▄▄▄▄▀       █     █  █ ███▄  █▄   ▄▀ █  █  "
-        echo " ▐  ▐ ███▀ █   ▀▄         ▀ ▐ █  █ █ █▄ ▄█ █   ▀▄      ▐ █  █ █              ▀         █     ▀ ▀███▀     █   "
-        echo "            ▀                 █   ██  ▀▀▀   ▀            █   ██                       █                 ▀    "
-        echo "                                                                                     ▀ "
-        echo -e "${RST}"
+    local phase
+    phase="$(ui_phase "$page_idx")"
+    local title="IIDX Linux Installer"
+    if [ "$ui_width" -ge 32 ]; then
+        local gap=$((ui_width - ${#title} - ${#phase} - 4))
+        [ "$gap" -lt 1 ] && gap=1
+        printf '  %b%s%b%*s%b%s%b\n' "$MAG$BLD" "$title" "$RST" "$gap" '' "$CYN$BLD" "$phase" "$RST"
     else
-        local phase
-        phase="$(ui_phase "$page_idx")"
-        local title="IIDX Linux Installer"
-        if [ "$ui_width" -ge 32 ]; then
-            local gap=$((ui_width - ${#title} - ${#phase} - 4))
-            [ "$gap" -lt 1 ] && gap=1
-            printf '  %b%s%b%*s%b%s%b\n' "$MAG$BLD" "$title" "$RST" "$gap" '' "$CYN$BLD" "$phase" "$RST"
-        else
-            printf '  %bIIDX Installer%b\n' "$MAG$BLD" "$RST"
-        fi
+        printf '  %bIIDX Installer%b\n' "$MAG$BLD" "$RST"
     fi
 
     ui_rule
@@ -511,6 +519,7 @@ draw_header() {
     bar="${bar}${RST}"
     ui_center "$bar" "$bar_width"
 
+    ui_install_dashboard
     ui_rule
     echo ""
 }
@@ -521,15 +530,26 @@ page_footer() {
 }
 
 read_nav() {
+    [ "${UI_AUTONEXT:-0}" = "1" ] && return 0
     if [ "$AUTO_YES" = "1" ]; then return 0; fi
     local input
     while true; do
-        echo -e "\n  ${BLD}Enter${RST} Continue   ${BLD}b${RST} Back   ${BLD}q${RST} Quit"
+        if [ "$UI_LOCK_BACK" = "1" ]; then
+            echo -e "\n  ${BLD}Enter${RST} Continue   ${BLD}q${RST} Quit"
+        else
+            echo -e "\n  ${BLD}Enter${RST} Continue   ${BLD}b${RST} Back   ${BLD}q${RST} Quit"
+        fi
         echo -en "  ${CYN}›${RST} "
         read -r input
         case "${input,,}" in
             "") return 0 ;;
-            b)  return 1 ;;
+            b)
+                if [ "$UI_LOCK_BACK" = "1" ]; then
+                    warn "Back navigation is unavailable after installation has started."
+                else
+                    return 1
+                fi
+                ;;
             q)  echo "Aborted."; exit 0 ;;
             *)  warn "Use Enter to continue, b to go back, or q to quit." ;;
         esac
@@ -573,7 +593,13 @@ confirm() {
         case "${answer,,}" in
             y|yes) return 0 ;;
             n|no)  return 1 ;;
-            b) return 2 ;;
+            b)
+                if [ "$UI_LOCK_BACK" = "1" ]; then
+                    warn "Back navigation is unavailable after installation has started."
+                    continue
+                fi
+                return 2
+                ;;
             q) echo "Aborted."; exit 0 ;;
             *) warn "Answer y/n, b to go back, or q to quit." ;;
         esac
@@ -603,7 +629,13 @@ prompt_value() {
         echo -en "  ${CYN}?${RST} $msg$hint: "
         read -r value
         case "${value,,}" in
-            b) return 1 ;;
+            b)
+                if [ "$UI_LOCK_BACK" = "1" ]; then
+                    warn "Back navigation is unavailable after installation has started."
+                    continue
+                fi
+                return 1
+                ;;
             q) echo "Aborted."; exit 0 ;;
         esac
         value="${value:-$default}"
@@ -1284,7 +1316,9 @@ page_versions() {
     SPICE_VER="${BMSOUND_VER}_${SPICE_DATE}"
     PROTON_DIR="proton-ge-${PROTON_VER//./-}-iidx${GAME_STYLE}"
     GAME_DIR="$STEAM_ROOT/steamapps/common/Beatmania IIDX $GAME_STYLE"
-    WORK_DIR="$(mktemp -d /tmp/iidx-install-XXXXXX)"
+    if [ -z "${WORK_DIR:-}" ] || [ ! -d "$WORK_DIR" ]; then
+        WORK_DIR="$(mktemp -d /tmp/iidx-install-XXXXXX)"
+    fi
 
     success "proton-ge: $PROTON_VER (will be installed as $PROTON_DIR)"
 
@@ -1292,8 +1326,61 @@ page_versions() {
     read_nav || { BMSOUND_VER=""; SPICE_DATE=""; pop_page; return; }
 }
 
+page_setup() {
+    local baseline=${#PAGE_HISTORY[@]}
+    local old_autonext="$UI_AUTONEXT"
+    UI_MAIN_PAGE_OVERRIDE=1
+    UI_AUTONEXT=1
+
+    local labels=("Game and dump" "Steam library" "Display setup" "Component versions")
+    local steps=(page_configuration page_steam page_monitor page_versions)
+    local i
+    for i in "${!steps[@]}"; do
+        UI_ACTIVE_SUB_LABEL="${labels[$i]}"
+        "${steps[$i]}"
+        if [ ${#PAGE_HISTORY[@]} -lt "$baseline" ]; then
+            UI_MAIN_PAGE_OVERRIDE=""
+            UI_ACTIVE_SUB_LABEL=""
+            UI_AUTONEXT="$old_autonext"
+            return 0
+        fi
+    done
+
+    UI_MAIN_PAGE_OVERRIDE=""
+    UI_ACTIVE_SUB_LABEL=""
+    UI_AUTONEXT="$old_autonext"
+}
+
+page_install() {
+    local baseline=${#PAGE_HISTORY[@]}
+    local old_autonext="$UI_AUTONEXT"
+    UI_MAIN_PAGE_OVERRIDE=3
+    UI_AUTONEXT=1
+    UI_LOCK_BACK=1
+    INSTALL_TASK_STATES=(pending pending pending pending pending pending pending pending pending)
+
+    local steps=(page_deps page_groups page_base page_proton page_binaries page_game page_network page_verify page_launchers)
+    local i
+    for i in "${!steps[@]}"; do
+        INSTALL_TASK_STATES[$i]=running
+        UI_ACTIVE_SUB_LABEL="${INSTALL_TASK_NAMES[$i]}"
+        "${steps[$i]}"
+        if [ ${#PAGE_HISTORY[@]} -lt "$baseline" ]; then
+            UI_MAIN_PAGE_OVERRIDE=""
+            UI_ACTIVE_SUB_LABEL=""
+            UI_AUTONEXT="$old_autonext"
+            return 0
+        fi
+        INSTALL_TASK_STATES[$i]=done
+    done
+
+    UI_MAIN_PAGE_OVERRIDE=""
+    UI_ACTIVE_SUB_LABEL=""
+    UI_AUTONEXT="$old_autonext"
+}
+
 page_summary() {
-    draw_header 5
+    draw_header 2
     ui_section "Installation summary"
     ui_kv "Game style" "${BLD}${GRN}$GAME_STYLE${RST}"
     ui_kv "Dump path" "${BLD}$DUMP_PATH${RST}"
@@ -1315,9 +1402,6 @@ page_summary() {
     warn "This will modify your system. Make sure everything above is correct."
     echo ""
     confirm "Proceed with installation?" "y" || { pop_page; return; }
-
-    page_footer
-    read_nav || { pop_page; return; }
 }
 
 ensure_void_multilib() {
@@ -2255,7 +2339,9 @@ EOF
 }
 
 page_patches() {
-    draw_header 15
+    UI_MAIN_PAGE_OVERRIDE=4
+    draw_header 4
+    UI_MAIN_PAGE_OVERRIDE=""
     echo -e "  After installation, open spicecfg and go to the ${BLD}Patches${RST} tab.\n"
     echo -e "  ${BLD}First identify the game mode / DLL variant:${RST}\n"
     echo -e "    ${BLD}LDJ (012)${RST}  Standard/legacy mode, normally 60 Hz"
@@ -2287,7 +2373,9 @@ page_patches() {
 }
 
 page_done() {
-    draw_header 16
+    UI_MAIN_PAGE_OVERRIDE=5
+    draw_header 5
+    UI_MAIN_PAGE_OVERRIDE=""
     # WORK_DIR cleaned up by trap on EXIT
 
     echo -e "  ${GRN}${BLD}Installation complete!${RST}\n"
@@ -2320,16 +2408,9 @@ page_done() {
 ## Uninstaller
 ##
 run_uninstaller() {
-    clear
-    echo -e "${RED}${BLD}"
-    echo "▄█ ▄█ ██▄      ▄      █    ▄█    ▄     ▄       ▄      ▄█    ▄      ▄▄▄▄▄      ▄▄▄▄▀ ██   █     ▄███▄   █▄▄▄▄ "
-    echo "██ ██ █  █ ▀▄   █     █    ██     █     █  ▀▄   █     ██     █    █     ▀▄ ▀▀▀ █    █ █  █     █▀   ▀  █  ▄▀ "
-    echo "██ ██ █   █  █ ▀      █    ██ ██   █ █   █   █ ▀      ██ ██   █ ▄  ▀▀▀▀▄       █    █▄▄█ █     ██▄▄    █▀▀▌  "
-    echo "▐█ ▐█ █  █  ▄ █       ███▄ ▐█ █ █  █ █   █  ▄ █       ▐█ █ █  █  ▀▄▄▄▄▀       █     █  █ ███▄  █▄   ▄▀ █  █  "
-    echo " ▐  ▐ ███▀ █   ▀▄         ▀ ▐ █  █ █ █▄ ▄█ █   ▀▄      ▐ █  █ █              ▀         █     ▀ ▀███▀     █   "
-    echo "            ▀                 █   ██  ▀▀▀   ▀            █   ██                       █                 ▀    "
-    echo "                                                                                     ▀ "
-    echo -e "${RST}"
+    [ -t 1 ] && clear
+    echo -e "  ${RED}${BLD}IIDX Linux Installer · Uninstall${RST}"
+    ui_rule
     echo ""
 
 
@@ -2562,20 +2643,9 @@ run_uninstaller() {
 main() {
     local pages=(
         page_intro
-        page_configuration
-        page_steam
-        page_monitor
-        page_versions
+        page_setup
         page_summary
-        page_deps
-        page_groups
-        page_base
-        page_proton
-        page_binaries
-        page_game
-        page_network
-        page_verify
-        page_launchers
+        page_install
         page_patches
         page_done
     )
