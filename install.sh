@@ -46,7 +46,7 @@ fi
 DISTRO_ID=""
 DISTRO_NAME=""
 PKG_MGR=""
-PKG_QUERY=""
+PKG_QUERY=()
 PKG_INSTALL=()
 PKG_INSTALL_OPTS=()
 VOID_LIBC=""
@@ -200,25 +200,25 @@ detect_distro() {
     case "$DISTRO_ID" in
         arch)
             PKG_MGR="pacman"
-            PKG_QUERY="pacman -Q"
+            PKG_QUERY=(pacman -Q)
             PKG_INSTALL=(pacman -S)
             PKG_INSTALL_OPTS=(--needed)
             ;;
         debian|ubuntu)
             PKG_MGR="apt"
-            PKG_QUERY="dpkg -l"
+            PKG_QUERY=(dpkg -l)
             PKG_INSTALL=(apt install)
             PKG_INSTALL_OPTS=( )
             ;;
         fedora)
             PKG_MGR="dnf"
-            PKG_QUERY="rpm -q"
+            PKG_QUERY=(rpm -q)
             PKG_INSTALL=(dnf install)
             PKG_INSTALL_OPTS=( )
             ;;
         void)
             PKG_MGR="xbps"
-            PKG_QUERY="xbps-query -p pkgver"
+            PKG_QUERY=(xbps-query -p pkgver)
             PKG_INSTALL=(xbps-install -S)
             PKG_INSTALL_OPTS=( )
             ;;
@@ -226,27 +226,27 @@ detect_distro() {
             # Fallback: detect by package manager binary
             if command -v pacman &>/dev/null; then
                 PKG_MGR="pacman"
-                PKG_QUERY="pacman -Q"
+                PKG_QUERY=(pacman -Q)
                 PKG_INSTALL=(pacman -S)
                 PKG_INSTALL_OPTS=(--needed)
             elif command -v apt &>/dev/null; then
                 PKG_MGR="apt"
-                PKG_QUERY="dpkg -l"
+                PKG_QUERY=(dpkg -l)
                 PKG_INSTALL=(apt install)
                 PKG_INSTALL_OPTS=( )
             elif command -v dnf &>/dev/null; then
                 PKG_MGR="dnf"
-                PKG_QUERY="rpm -q"
+                PKG_QUERY=(rpm -q)
                 PKG_INSTALL=(dnf install)
                 PKG_INSTALL_OPTS=( )
             elif command -v xbps-install &>/dev/null && command -v xbps-query &>/dev/null; then
                 PKG_MGR="xbps"
-                PKG_QUERY="xbps-query -p pkgver"
+                PKG_QUERY=(xbps-query -p pkgver)
                 PKG_INSTALL=(xbps-install -S)
                 PKG_INSTALL_OPTS=( )
             else
                 PKG_MGR="unknown"
-                PKG_QUERY=""
+                PKG_QUERY=()
                 PKG_INSTALL=()
             fi
             ;;
@@ -1477,7 +1477,7 @@ page_summary() {
 ensure_void_multilib() {
     [ "$PKG_MGR" = "xbps" ] || return 0
 
-    if $PKG_QUERY void-repo-multilib &>/dev/null; then
+    if "${PKG_QUERY[@]}" void-repo-multilib &>/dev/null; then
         success "Void multilib repository enabled"
         return 0
     fi
@@ -1525,7 +1525,7 @@ detect_gpu_vendors() {
 }
 
 vulkan_package_pair_installed() {
-    $PKG_QUERY "$1" &>/dev/null && $PKG_QUERY "$2" &>/dev/null
+    "${PKG_QUERY[@]}" "$1" &>/dev/null && "${PKG_QUERY[@]}" "$2" &>/dev/null
 }
 
 validate_vulkan() {
@@ -1549,7 +1549,7 @@ validate_vulkan() {
 
     local pkg
     for pkg in "$loader64" "$loader32"; do
-        if $PKG_QUERY "$pkg" &>/dev/null; then
+        if "${PKG_QUERY[@]}" "$pkg" &>/dev/null; then
             success "$pkg"
         else
             warn "$pkg not installed"
@@ -1755,7 +1755,7 @@ verify_wine_deps() {
     local missing=()
     for pkg in "${!WINE_DEPS[@]}"; do
         local pkgname="${WINE_DEPS[$pkg]}"
-        if $PKG_QUERY "$pkgname" &>/dev/null; then
+        if "${PKG_QUERY[@]}" "$pkgname" &>/dev/null; then
             success "$pkgname"
         else
             warn "$pkgname not installed"
@@ -1816,7 +1816,7 @@ page_deps() {
     done
 
     for pkg in "${!PKG_CHECK[@]}"; do
-        if $PKG_QUERY "${PKG_CHECK[$pkg]}" &>/dev/null; then
+        if "${PKG_QUERY[@]}" "${PKG_CHECK[$pkg]}" &>/dev/null; then
             success "${PKG_CHECK[$pkg]}"
         else
             warn "${PKG_CHECK[$pkg]} not installed"
