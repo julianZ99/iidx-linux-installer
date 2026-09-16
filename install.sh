@@ -815,11 +815,13 @@ detect_steam_home() {
 }
 
 detect_resolution() {
-    xrandr 2>/dev/null | grep "^$MONITOR " -A1 | grep -oP '\d+x\d+(?=\+0\+0)' | head -1 || true
+    local monitor="${1:-$MONITOR}"
+    xrandr 2>/dev/null | grep "^$monitor " -A1 | grep -oP '\d+x\d+(?=\+0\+0)' | head -1 || true
 }
 
 detect_rate() {
-    xrandr 2>/dev/null | grep "^$MONITOR " | grep -oP '\d+\.\d+(?=\*)' | head -1 || true
+    local monitor="${1:-$MONITOR}"
+    xrandr 2>/dev/null | grep "^$monitor " | grep -oP '\d+\.\d+(?=\*)' | head -1 || true
 }
 
 detect_compositor() {
@@ -889,10 +891,10 @@ disable_monitor_management() {
 list_monitors_hyprland() {
     hyprctl monitors all 2>/dev/null | grep "^Monitor " | awk '{print $2}'
 }
-monitor_res_hyprland() {
+hyprland_monitor_resolution() {
     hyprctl monitors all 2>/dev/null | grep -A1 "^Monitor $1 " | tail -1 | grep -oP '\d+x\d+(?=@)' || true
 }
-monitor_rate_hyprland() {
+hyprland_monitor_rate() {
     hyprctl monitors all 2>/dev/null | grep -A1 "^Monitor $1 " | tail -1 | grep -oP '@\K[\d.]+' || true
 }
 monitor_disable_hyprland() {
@@ -900,6 +902,24 @@ monitor_disable_hyprland() {
 }
 monitor_enable_hyprland() {
     hyprctl keyword monitor "$1,preferred,auto,1"
+}
+monitor_list_hyprland() {
+    list_monitors_hyprland
+}
+monitor_description_hyprland() {
+    printf '%s\n' "$1"
+}
+monitor_exists_hyprland() {
+    hyprctl monitors all 2>/dev/null | awk -v name="$1" '$1 == "Monitor" && $2 == name { found=1 } END { exit !found }'
+}
+monitor_resolution_hyprland() {
+    hyprland_monitor_resolution "$1"
+}
+monitor_rate_hyprland() {
+    hyprland_monitor_rate "$1"
+}
+monitor_mode_id_hyprland() {
+    printf ''
 }
 
 ## KDE Plasma Wayland monitor helpers (KScreen/KWin). The human-readable
@@ -946,12 +966,12 @@ monitor_mode_plasma() {
         }
     '
 }
-monitor_res_plasma() {
+plasma_monitor_resolution() {
     local mode
     mode="$(monitor_mode_plasma "$1")"
     printf '%s\n' "${mode%@*}"
 }
-monitor_rate_plasma() {
+plasma_monitor_rate() {
     local mode
     mode="$(monitor_mode_plasma "$1")"
     printf '%s\n' "${mode##*@}"
@@ -983,6 +1003,206 @@ monitor_mode_id_plasma() {
             exit
         }
     '
+}
+
+monitor_list_plasma() {
+    list_monitors_plasma
+}
+monitor_description_plasma() {
+    printf '%s\n' "$1"
+}
+monitor_resolution_plasma() {
+    plasma_monitor_resolution "$1"
+}
+monitor_rate_plasma() {
+    plasma_monitor_rate "$1"
+}
+monitor_list_x11() {
+    xrandr 2>/dev/null | awk '$2 == "connected" { print $1 }'
+}
+monitor_description_x11() {
+    xrandr 2>/dev/null | awk -v name="$1" '$1 == name && $2 == "connected" { print $1 " - " $3; exit }'
+}
+monitor_exists_x11() {
+    xrandr 2>/dev/null | awk -v name="$1" '$1 == name && $2 == "connected" { found=1 } END { exit !found }'
+}
+monitor_resolution_x11() {
+    detect_resolution "$1"
+}
+monitor_rate_x11() {
+    detect_rate "$1"
+}
+monitor_mode_id_x11() {
+    printf ''
+}
+
+monitor_launcher_exec_hyprland() {
+    local helper="$1" exec_base="$2" monitor="$3" resolution="$4"
+    local refresh_rate="$5" secondary_monitor="$6" q_sec=""
+    local q_mon="$(printf '%q' "$monitor")"
+    local q_res="$(printf '%q' "$resolution")"
+    local q_rate="$(printf '%q' "$refresh_rate")"
+    cat > "$helper" <<'HELPER'
+#!/bin/bash
+case "$1" in
+    save)
+        f="$2"
+        : > "$f"
+        hyprctl monitors all 2>/dev/null | grep '^Monitor ' | while IFS= read -r line; do
+            m="${line#Monitor }"
+            m="${m%% *}"
+            blk="$(hyprctl monitors all 2>/dev/null | sed -n "/^Monitor $m /,/^\$/p")"
+            res="$(printf '%s' "$blk" | grep -oP '^\s*\K\d+x\d+(?=@)' | head -1)"
+            rate="$(printf '%s' "$blk" | grep -oP '@\K[\d.]+' | head -1)"
+            pos="$(printf '%s' "$blk" | grep -oP 'at \K-?\d+x-?\d+')"
+            trans="$(printf '%s' "$blk" | grep -oP 'transform:\s*\K\d+' || echo 0)"
+            full="${res:-preferred}"
+            [ -n "$rate" ] && full="${full}@${rate}"
+            printf '%s\n' "hyprctl keyword monitor '$m,$full,${pos:-auto},1'"
+            [ "$trans" != "0" ] && printf '%s\n' "hyprctl keyword monitor '$m,transform,$trans'"
+        done > "$f"
+        ;;
+    restore)
+        [ -f "$2" ] && bash "$2"
+        ;;
+esac
+HELPER
+    chmod +x "$helper"
+    if [ -n "$secondary_monitor" ]; then
+        q_sec="$(printf '%q' "$secondary_monitor")"
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); %s save \\"$f\\" && hyprctl keyword monitor %s,disable && hyprctl keyword monitor %s,%s@%s,auto,1 && %s; source \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_sec" "$q_mon" "$q_res" "$q_rate" "$exec_base"
+    else
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); %s save \\"$f\\" && hyprctl keyword monitor %s,%s@%s,auto,1 && %s; source \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_mon" "$q_res" "$q_rate" "$exec_base"
+    fi
+}
+
+monitor_launcher_exec_plasma() {
+    local helper="$1" exec_base="$2" monitor="$3" secondary_monitor="$6"
+    local mode_id="$7" q_sec=""
+    local q_mon="$(printf '%q' "$monitor")"
+    local q_mode_id="$(printf '%q' "$mode_id")"
+    cat > "$helper" <<'HELPER'
+#!/bin/bash
+set -u
+
+case "${1:-}" in
+    save)
+        state_file="$2"
+        kscreen-doctor --json > "$state_file"
+        jq -e '.outputs | type == "array"' "$state_file" >/dev/null
+        ;;
+    restore)
+        state_file="$2"
+        [ -s "$state_file" ] || exit 1
+        jq -e '.outputs | type == "array"' "$state_file" >/dev/null || exit 1
+        mapfile -t args < <(jq -r '
+            def rotation_name:
+                if . == 1 then "none"
+                elif . == 2 then "left"
+                elif . == 4 then "inverted"
+                elif . == 8 then "right"
+                elif . == 16 then "flipped"
+                elif . == 32 then "flipped90"
+                elif . == 64 then "flipped180"
+                elif . == 128 then "flipped270"
+                else "none"
+                end;
+            .outputs[] | select(.connected == true) |
+            .id as $id |
+            if (if has("enabled") then .enabled else true end) then
+                "output.\($id).enable",
+                (if (.currentModeId | tostring | length) > 0 then
+                    "output.\($id).mode.\(.currentModeId)"
+                 else empty end),
+                "output.\($id).position.\(.pos.x),\(.pos.y)",
+                "output.\($id).scale.\(.scale // 1)",
+                "output.\($id).rotation.\(.rotation | rotation_name)",
+                (if (.priority // 0) > 0 then
+                    "output.\($id).priority.\(.priority)"
+                 else empty end)
+            else
+                "output.\($id).disable"
+            end
+        ' "$state_file")
+        [ "${#args[@]}" -gt 0 ] && kscreen-doctor "${args[@]}"
+        ;;
+    *)
+        echo "Usage: $0 {save|restore} STATE_FILE" >&2
+        exit 2
+        ;;
+esac
+HELPER
+    chmod +x "$helper"
+    if [ -n "$secondary_monitor" ]; then
+        q_sec="$(printf '%q' "$secondary_monitor")"
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); %s save \\"$f\\" && kscreen-doctor output.%s.disable output.%s.enable output.%s.mode.%s output.%s.priority.1 && %s; %s restore \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_sec" "$q_mon" "$q_mon" "$q_mode_id" "$q_mon" "$exec_base" "$helper"
+    else
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); %s save \\"$f\\" && kscreen-doctor output.%s.enable output.%s.mode.%s output.%s.priority.1 && %s; %s restore \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_mon" "$q_mon" "$q_mode_id" "$q_mon" "$exec_base" "$helper"
+    fi
+}
+
+monitor_launcher_exec_x11() {
+    local helper="$1" exec_base="$2" monitor="$3" resolution="$4"
+    local refresh_rate="$5" secondary_monitor="$6" q_sec=""
+    local q_mon="$(printf '%q' "$monitor")"
+    local q_res="$(printf '%q' "$resolution")"
+    local q_rate="$(printf '%q' "$refresh_rate")"
+    cat > "$helper" <<'HELPER'
+#!/bin/bash
+case "$1" in
+    save)
+        f="$2"
+        : > "$f"
+        xrandr 2>/dev/null | grep ' connected ' | while IFS= read -r line; do
+            m="$(printf '%s' "$line" | awk '{print $1}')"
+            mode="$(printf '%s' "$line" | grep -oP '\d+x\d+(?=[-+])' || true)"
+            pos_raw="$(printf '%s' "$line" | grep -oP '[-+]\d+[-+]\d+' || echo '+0+0')"
+            rot="$(printf '%s' "$line" | grep -oP '\(\K(normal|left|inverted|right)' || echo 'normal')"
+            if [[ "$pos_raw" =~ ^([-+]?)([0-9]+)([-+])([0-9]+)$ ]]; then
+                x="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+                y="${BASH_REMATCH[3]}${BASH_REMATCH[4]}"
+                x="${x#+}"
+                y="${y#+}"
+                pos="${x}x${y}"
+            fi
+            if [ -n "$mode" ]; then
+                printf '%s\n' "xrandr --output '$m' --mode '$mode' --pos '$pos' --rotate '$rot'"
+            else
+                printf '%s\n' "xrandr --output '$m' --auto --pos '$pos' --rotate '$rot'"
+            fi
+        done > "$f"
+        ;;
+    restore)
+        [ -f "$2" ] && bash "$2"
+        ;;
+esac
+HELPER
+    chmod +x "$helper"
+    if [ -n "$secondary_monitor" ]; then
+        q_sec="$(printf '%q' "$secondary_monitor")"
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); %s save \\"$f\\" && xrandr --output %s --off && xrandr --output %s --mode %s --rate %s && __GL_SYNC_DISPLAY_DEVICE=%s %s; source \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_sec" "$q_mon" "$q_res" "$q_rate" "$q_mon" "$exec_base"
+    else
+        printf 'bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); %s save \\"$f\\" && xrandr --output %s --mode %s --rate %s && __GL_SYNC_DISPLAY_DEVICE=%s %s; source \\"$f\\" 2>/dev/null || true; rm -f \\"$f\\""' "$helper" "$q_mon" "$q_res" "$q_rate" "$q_mon" "$exec_base"
+    fi
+}
+
+monitor_backend_call() {
+    local operation="$1"
+    shift
+    local backend
+    case "$SESSION_TYPE" in
+        hyprland) backend="hyprland" ;;
+        plasma-wayland) backend="plasma" ;;
+        x11) backend="x11" ;;
+        *) return 1 ;;
+    esac
+    case "$operation" in
+        list|description|exists|resolution|rate|mode_id|launcher_exec) ;;
+        *) return 2 ;;
+    esac
+    local handler="monitor_${operation}_${backend}"
+    declare -F "$handler" >/dev/null || return 2
+    "$handler" "$@"
 }
 
 ##
@@ -1214,70 +1434,30 @@ page_monitor() {
 
     if [ -z "$MONITOR" ]; then
         echo -e "  ${BLD}Connected monitors:${RST}"
-        case "$SESSION_TYPE" in
-            hyprland)
-                list_monitors_hyprland | awk '{print "    " NR ") " $0}'
-                echo ""
-                while true; do
-                    prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
-                    if hyprctl monitors all 2>/dev/null | grep -q "^Monitor $MONITOR "; then
-                        break
-                    fi
-                    warn "Monitor '$MONITOR' not found. Use a name from the list above."
-                    MONITOR=""
-                done
-                ;;
-            plasma-wayland)
-                list_monitors_plasma | awk '{print "    " NR ") " $0}'
-                echo ""
-                while true; do
-                    prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
-                    if monitor_exists_plasma "$MONITOR"; then
-                        break
-                    fi
-                    warn "Monitor '$MONITOR' not found. Use a name from the list above."
-                    MONITOR=""
-                done
-                ;;
-            x11)
-                xrandr 2>/dev/null | grep " connected" | awk '{print "    " NR ") " $1 " - " $3}'
-                echo ""
-                while true; do
-                    prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
-                    if xrandr 2>/dev/null | grep -q "^$MONITOR "; then
-                        break
-                    fi
-                    warn "Monitor '$MONITOR' not found. Use a name from the list above."
-                    MONITOR=""
-                done
-                ;;
-        esac
+        local monitor_index=1
+        local listed_monitor
+        while IFS= read -r listed_monitor; do
+            printf '    %s) %s\n' "$monitor_index" "$(monitor_backend_call description "$listed_monitor")"
+            ((monitor_index++))
+        done < <(monitor_backend_call list)
+        echo ""
+        while true; do
+            prompt_value "Primary monitor name" MONITOR "" "DP-1" || { MONITOR=""; pop_page; return; }
+            if monitor_backend_call exists "$MONITOR"; then
+                break
+            fi
+            warn "Monitor '$MONITOR' not found. Use a name from the list above."
+            MONITOR=""
+        done
     else
-        local monitor_valid=1
-        case "$SESSION_TYPE" in
-            plasma-wayland) monitor_exists_plasma "$MONITOR" || monitor_valid=0 ;;
-            hyprland) hyprctl monitors all 2>/dev/null | grep -q "^Monitor $MONITOR " || monitor_valid=0 ;;
-            x11) xrandr 2>/dev/null | grep -q "^$MONITOR " || monitor_valid=0 ;;
-        esac
-        if [ "$monitor_valid" = "0" ]; then
+        if ! monitor_backend_call exists "$MONITOR"; then
             die "Primary monitor '$MONITOR' is not connected in the current $SESSION_TYPE session."
         fi
         success "Primary monitor: $MONITOR"
     fi
 
     if [ -z "$SECONDARY_MONITOR" ]; then
-        local others=""
-        case "$SESSION_TYPE" in
-            hyprland)
-                others="$(list_monitors_hyprland | grep -v "^${MONITOR}$" || true)"
-                ;;
-            plasma-wayland)
-                others="$(list_monitors_plasma | grep -v "^${MONITOR}$" || true)"
-                ;;
-            x11)
-                others="$(xrandr 2>/dev/null | grep " connected" | awk '{print $1}' | grep -v "^${MONITOR}$" || true)"
-                ;;
-        esac
+        local others="$(monitor_backend_call list | grep -Fxv -- "$MONITOR" || true)"
         if [ -n "$others" ]; then
             echo ""
             echo -e "  Other connected monitors: ${BLD}$(echo "$others" | tr '\n' ' ')${RST}"
@@ -1302,13 +1482,7 @@ page_monitor() {
         if [ "$SECONDARY_MONITOR" = "$MONITOR" ]; then
             die "Primary and secondary monitor cannot both be '$MONITOR'."
         fi
-        local secondary_valid=1
-        case "$SESSION_TYPE" in
-            plasma-wayland) monitor_exists_plasma "$SECONDARY_MONITOR" || secondary_valid=0 ;;
-            hyprland) hyprctl monitors all 2>/dev/null | grep -q "^Monitor $SECONDARY_MONITOR " || secondary_valid=0 ;;
-            x11) xrandr 2>/dev/null | grep -q "^$SECONDARY_MONITOR " || secondary_valid=0 ;;
-        esac
-        if [ "$secondary_valid" = "0" ]; then
+        if ! monitor_backend_call exists "$SECONDARY_MONITOR"; then
             die "Secondary monitor '$SECONDARY_MONITOR' is not connected in the current $SESSION_TYPE session."
         fi
         success "Secondary monitor: $SECONDARY_MONITOR (will be disabled)"
@@ -1316,12 +1490,7 @@ page_monitor() {
 
     if [ -z "$GAME_RATE" ]; then
         echo ""
-        local detected_rate=""
-        case "$SESSION_TYPE" in
-            hyprland) detected_rate="$(monitor_rate_hyprland "$MONITOR")" ;;
-            plasma-wayland) detected_rate="$(monitor_rate_plasma "$MONITOR")" ;;
-            x11)      detected_rate="$(detect_rate)" ;;
-        esac
+        local detected_rate="$(monitor_backend_call rate "$MONITOR")"
         log "Current refresh rate on $MONITOR: ${detected_rate:-unknown}hz"
         log "IIDX typically requires 120hz (60hz for some dumps/cabinets). The launcher will switch the primary monitor rate on every launch."
         echo ""
@@ -1331,12 +1500,7 @@ page_monitor() {
     fi
 
     if [ -z "$GAME_RES" ]; then
-        local detected_res=""
-        case "$SESSION_TYPE" in
-            hyprland) detected_res="$(monitor_res_hyprland "$MONITOR")" ;;
-            plasma-wayland) detected_res="$(monitor_res_plasma "$MONITOR")" ;;
-            x11)      detected_res="$(detect_resolution)" ;;
-        esac
+        local detected_res="$(monitor_backend_call resolution "$MONITOR")"
         if [ -n "$detected_res" ]; then
             GAME_RES="$detected_res"
             success "Detected resolution: $GAME_RES"
@@ -1349,7 +1513,7 @@ page_monitor() {
     fi
 
     if [ "$SESSION_TYPE" = "plasma-wayland" ]; then
-        GAME_MODE_ID="$(monitor_mode_id_plasma "$MONITOR" "$GAME_RES" "$GAME_RATE")"
+        GAME_MODE_ID="$(monitor_backend_call mode_id "$MONITOR" "$GAME_RES" "$GAME_RATE")"
         [ -n "$GAME_MODE_ID" ] || \
             die "KScreen has no ${GAME_RES}@${GAME_RATE}Hz mode for '$MONITOR'. Choose a supported resolution/rate."
         success "KScreen mode: $GAME_MODE_ID (${GAME_RES}@${GAME_RATE}hz)"
@@ -2355,153 +2519,16 @@ EOF
 
     local q_mon="$(printf '%q' "$MONITOR")"
     local exec_game
-    local q_res="$(printf '%q' "$GAME_RES")"
-    local q_rate="$(printf '%q' "$GAME_RATE")"
-    local q_mode_id="$(printf '%q' "${GAME_MODE_ID:-${GAME_RES}@${GAME_RATE}}")"
     local helper="$AUTOMIZATION_DIR/helper/iidx-mon-state.sh"
-    case "$SESSION_TYPE" in
-        hyprland)
-            cat > "$helper" <<'HELPER'
-#!/bin/bash
-case "$1" in
-    save)
-        f="$2"
-        : > "$f"
-        hyprctl monitors all 2>/dev/null | grep '^Monitor ' | while IFS= read -r line; do
-            m="${line#Monitor }"
-            m="${m%% *}"
-            blk="$(hyprctl monitors all 2>/dev/null | sed -n "/^Monitor $m /,/^\$/p")"
-            res="$(printf '%s' "$blk" | grep -oP '^\s*\K\d+x\d+(?=@)' | head -1)"
-            rate="$(printf '%s' "$blk" | grep -oP '@\K[\d.]+' | head -1)"
-            pos="$(printf '%s' "$blk" | grep -oP 'at \K-?\d+x-?\d+')"
-            trans="$(printf '%s' "$blk" | grep -oP 'transform:\s*\K\d+' || echo 0)"
-            full="${res:-preferred}"
-            [ -n "$rate" ] && full="${full}@${rate}"
-            printf '%s\n' "hyprctl keyword monitor '$m,$full,${pos:-auto},1'"
-            [ "$trans" != "0" ] && printf '%s\n' "hyprctl keyword monitor '$m,transform,$trans'"
-        done > "$f"
-        ;;
-    restore)
-        [ -f "$2" ] && bash "$2"
-        ;;
-esac
-HELPER
-            chmod +x "$helper"
-
-            if [ -n "$SECONDARY_MONITOR" ]; then
-                local q_sec="$(printf '%q' "$SECONDARY_MONITOR")"
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_sec"',disable && hyprctl keyword monitor '"$q_mon"','"$q_res"'@'"$q_rate"',auto,1 && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            else
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && hyprctl keyword monitor '"$q_mon"','"$q_res"'@'"$q_rate"',auto,1 && '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            fi
-            ;;
-        plasma-wayland)
-            cat > "$helper" <<'HELPER'
-#!/bin/bash
-set -u
-
-case "${1:-}" in
-    save)
-        state_file="$2"
-        kscreen-doctor --json > "$state_file"
-        jq -e '.outputs | type == "array"' "$state_file" >/dev/null
-        ;;
-    restore)
-        state_file="$2"
-        [ -s "$state_file" ] || exit 1
-        jq -e '.outputs | type == "array"' "$state_file" >/dev/null || exit 1
-        mapfile -t args < <(jq -r '
-            def rotation_name:
-                if . == 1 then "none"
-                elif . == 2 then "left"
-                elif . == 4 then "inverted"
-                elif . == 8 then "right"
-                elif . == 16 then "flipped"
-                elif . == 32 then "flipped90"
-                elif . == 64 then "flipped180"
-                elif . == 128 then "flipped270"
-                else "none"
-                end;
-            .outputs[] | select(.connected == true) |
-            .id as $id |
-            if (if has("enabled") then .enabled else true end) then
-                "output.\($id).enable",
-                (if (.currentModeId | tostring | length) > 0 then
-                    "output.\($id).mode.\(.currentModeId)"
-                 else empty end),
-                "output.\($id).position.\(.pos.x),\(.pos.y)",
-                "output.\($id).scale.\(.scale // 1)",
-                "output.\($id).rotation.\(.rotation | rotation_name)",
-                (if (.priority // 0) > 0 then
-                    "output.\($id).priority.\(.priority)"
-                 else empty end)
-            else
-                "output.\($id).disable"
-            end
-        ' "$state_file")
-        [ "${#args[@]}" -gt 0 ] && kscreen-doctor "${args[@]}"
-        ;;
-    *)
-        echo "Usage: $0 {save|restore} STATE_FILE" >&2
-        exit 2
-        ;;
-esac
-HELPER
-            chmod +x "$helper"
-
-            if [ -n "$SECONDARY_MONITOR" ]; then
-                local q_sec="$(printf '%q' "$SECONDARY_MONITOR")"
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); '"$helper"' save \"$f\" && kscreen-doctor output.'"$q_sec"'.disable output.'"$q_mon"'.enable output.'"$q_mon"'.mode.'"$q_mode_id"' output.'"$q_mon"'.priority.1 && '"$exec_base"'; '"$helper"' restore \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            else
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.json); '"$helper"' save \"$f\" && kscreen-doctor output.'"$q_mon"'.enable output.'"$q_mon"'.mode.'"$q_mode_id"' output.'"$q_mon"'.priority.1 && '"$exec_base"'; '"$helper"' restore \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            fi
-            ;;
-        x11)
-            cat > "$helper" <<'HELPER'
-#!/bin/bash
-case "$1" in
-    save)
-        f="$2"
-        : > "$f"
-        xrandr 2>/dev/null | grep ' connected ' | while IFS= read -r line; do
-            m="$(printf '%s' "$line" | awk '{print $1}')"
-            mode="$(printf '%s' "$line" | grep -oP '\d+x\d+(?=[-+])' || true)"
-            pos_raw="$(printf '%s' "$line" | grep -oP '[-+]\d+[-+]\d+' || echo '+0+0')"
-            rot="$(printf '%s' "$line" | grep -oP '\(\K(normal|left|inverted|right)' || echo 'normal')"
-            if [[ "$pos_raw" =~ ^([-+]?)([0-9]+)([-+])([0-9]+)$ ]]; then
-                x="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
-                y="${BASH_REMATCH[3]}${BASH_REMATCH[4]}"
-                x="${x#+}"
-                y="${y#+}"
-                pos="${x}x${y}"
-            fi
-            if [ -n "$mode" ]; then
-                printf '%s\n' "xrandr --output '$m' --mode '$mode' --pos '$pos' --rotate '$rot'"
-            else
-                printf '%s\n' "xrandr --output '$m' --auto --pos '$pos' --rotate '$rot'"
-            fi
-        done > "$f"
-        ;;
-    restore)
-        [ -f "$2" ] && bash "$2"
-        ;;
-esac
-HELPER
-            chmod +x "$helper"
-
-            if [ -n "$SECONDARY_MONITOR" ]; then
-                local q_sec="$(printf '%q' "$SECONDARY_MONITOR")"
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && xrandr --output '"$q_sec"' --off && xrandr --output '"$q_mon"' --mode '"$q_res"' --rate '"$q_rate"' && __GL_SYNC_DISPLAY_DEVICE='"$q_mon"' '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            else
-                exec_game='bash -c "f=$(mktemp /tmp/iidx-XXXXXX.sh); '"$helper"' save \"$f\" && xrandr --output '"$q_mon"' --mode '"$q_res"' --rate '"$q_rate"' && __GL_SYNC_DISPLAY_DEVICE='"$q_mon"' '"$exec_base"'; source \"$f\" 2>/dev/null || true; rm -f \"$f\""'
-            fi
-            ;;
-        *)
-            warn "No safe monitor backend for '$SESSION_TYPE'; creating a direct launcher."
-            disable_monitor_management
-            exec_game="$exec_base"
-            ;;
-    esac
+    local launch_mode="${GAME_MODE_ID:-${GAME_RES}@${GAME_RATE}}"
+    # launcher_exec arguments: helper, base command, primary, resolution, rate, secondary, backend mode.
+    if ! exec_game="$(monitor_backend_call launcher_exec \
+        "$helper" "$exec_base" "$MONITOR" "$GAME_RES" "$GAME_RATE" \
+        "$SECONDARY_MONITOR" "$launch_mode")"; then
+        warn "No safe monitor backend for '$SESSION_TYPE'; creating a direct launcher."
+        disable_monitor_management
+        exec_game="$exec_base"
+    fi
 
     cat > "$HOME/.local/share/applications/iidx${GAME_STYLE}.desktop" <<EOF
 [Desktop Entry]
