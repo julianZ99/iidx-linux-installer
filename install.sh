@@ -356,7 +356,7 @@ init_pkg_maps() {
                 [sqlite-32bit]="sqlite-32bit"
                 [libpulseaudio-32bit]="libpulseaudio-32bit"
                 [alsa-plugins-32bit]="alsa-plugins-32bit"
-                [mpg123-32bit]="mpg123-32bit"
+                [libmpg123-32bit]="libmpg123-32bit"
                 [lcms2-32bit]="lcms2-32bit"
                 [libjpeg-turbo-32bit]="libjpeg-turbo-32bit"
                 [freetype-32bit]="freetype-32bit"
