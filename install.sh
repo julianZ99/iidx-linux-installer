@@ -112,6 +112,7 @@ Options:
   --bmsound-ver    <VER>   bmsound_wine version (default: latest)
   --spice-date     <DATE>  spicetools date (default: latest)
   --steam-home     <PATH>  Steam root path (auto-detected)
+  --icon           <PATH|URL> Optional desktop icon image (local file or HTTP(S) URL)
   --uninstall              Remove all installed files and optionally revert system changes
   --asphyxia-url   <URL>   Asphyxia server URL
   --asphyxia-pcbid <ID>    Cabinet PCBID
@@ -726,6 +727,8 @@ PROTON_VER="8.32"
 GAME_RATE=""
 GAME_RES=""
 GAME_MODE_ID=""
+ICON_SOURCE=""
+DESKTOP_ICON=""
 ASPHYXIA_URL=""
 ASPHYXIA_PCBID=""
 AUTO_YES=0
@@ -742,6 +745,7 @@ while [[ $# -gt 0 ]]; do
         --spice-date)         SPICE_DATE="$2";            shift 2 ;;
         --proton-ver)         PROTON_VER="$2";            shift 2 ;;
         --rate)               GAME_RATE="$2"; MONITOR_MGMT=1; shift 2 ;;
+        --icon)               ICON_SOURCE="$2";            shift 2 ;;
         --asphyxia-url)       ASPHYXIA_URL="$2";          shift 2 ;;
         --uninstall)          UNINSTALL=1;                shift   ;;
         --yes|-y)             AUTO_YES=1;                 shift   ;;
@@ -2193,11 +2197,117 @@ page_verify() {
     read_nav || { pop_page; return; }
 }
 
+prepare_desktop_icon() {
+    local icon_dir="$HOME/.local/share/icons"
+    local png_icon="$icon_dir/iidx${GAME_STYLE}.png"
+    local svg_icon="$icon_dir/iidx${GAME_STYLE}.svg"
+    local source="${ICON_SOURCE:-}"
+    local source_path=""
+    local input="$WORK_DIR/iidx-icon-source"
+    local converted_icon="$WORK_DIR/iidx-icon.png"
+    local previous_icon=""
+    local -a convert_cmd=()
+
+    DESKTOP_ICON=""
+    if [ -f "$HOME/.local/share/applications/iidx${GAME_STYLE}.desktop" ]; then
+        previous_icon="$(sed -n 's/^Icon=//p' \
+            "$HOME/.local/share/applications/iidx${GAME_STYLE}.desktop" | head -1)"
+        [ -f "$previous_icon" ] && DESKTOP_ICON="$previous_icon"
+    fi
+    if [ -z "$DESKTOP_ICON" ]; then
+        if [ -f "$png_icon" ]; then
+            DESKTOP_ICON="$png_icon"
+        elif [ -f "$svg_icon" ]; then
+            DESKTOP_ICON="$svg_icon"
+        fi
+    fi
+
+    [ -n "$source" ] || return 0
+
+    if [[ "$source" =~ ^https?:// ]]; then
+        if ! ui_run_with_spinner "Downloading desktop icon" \
+            curl --fail --location --silent --show-error \
+                --max-filesize 26214400 --output "$input" "$source"; then
+            warn "Could not download the desktop icon; keeping any existing icon."
+            return 0
+        fi
+        source_path="${source%%\?*}"
+        source_path="${source_path%%\#*}"
+    else
+        source="$(expand_path "$source")"
+        if [ ! -f "$source" ]; then
+            warn "Icon file not found: $source; keeping any existing icon."
+            return 0
+        fi
+        if ! cp -- "$source" "$input"; then
+            warn "Could not read icon file: $source; keeping any existing icon."
+            return 0
+        fi
+        source_path="$source"
+    fi
+
+    if ! mkdir -p "$icon_dir"; then
+        warn "Could not create icon directory: $icon_dir"
+        return 0
+    fi
+
+    # SVG is a desktop-entry standard icon format; keep it vector. For other
+    # image formats, normalize through FFmpeg (already required by the installer)
+    # so KDE/GNOME receive a portable PNG regardless of the source extension.
+    if [[ "${source_path,,}" == *.svg ]] || \
+        head -c 8192 "$input" | grep -Eiq '<svg([[:space:]>]|/)'; then
+        if cp -- "$input" "$svg_icon"; then
+            DESKTOP_ICON="$svg_icon"
+            success "Desktop icon installed: $DESKTOP_ICON"
+        else
+            warn "Could not install SVG icon; keeping any existing icon."
+        fi
+    else
+        # Prefer ImageMagick when available (it supports additional image
+        # formats); FFmpeg is the guaranteed fallback dependency.
+        if command -v magick >/dev/null 2>&1; then
+            convert_cmd=(magick "${input}[0]" -auto-orient -resize '512x512>' "$converted_icon")
+        elif command -v convert >/dev/null 2>&1; then
+            convert_cmd=(convert "${input}[0]" -auto-orient -resize '512x512>' "$converted_icon")
+        else
+            convert_cmd=(ffmpeg -nostdin -v error -y -i "$input" -frames:v 1
+                -vf "scale='min(512,iw)':'min(512,ih)':force_original_aspect_ratio=decrease"
+                "$converted_icon")
+        fi
+    fi
+
+    if [ "${#convert_cmd[@]}" -gt 0 ] && \
+        ui_run_with_spinner "Converting desktop icon" "${convert_cmd[@]}"; then
+        if mv -f -- "$converted_icon" "$png_icon"; then
+            DESKTOP_ICON="$png_icon"
+            success "Desktop icon installed: $DESKTOP_ICON"
+        else
+            warn "Could not install converted icon; keeping any existing icon."
+        fi
+    elif [ "${#convert_cmd[@]}" -gt 0 ]; then
+        if [ -n "$DESKTOP_ICON" ]; then
+            warn "Unsupported or invalid image; keeping the existing desktop icon."
+        else
+            warn "Unsupported or invalid image; the launchers will use the default icon."
+        fi
+    fi
+}
+
 page_launchers() {
     draw_header 14
     echo -e "  Creating .desktop launcher entries...\n"
 
     mkdir -p "$HOME/.local/share/applications"
+
+    if [ -z "$ICON_SOURCE" ] && [ "$AUTO_YES" != "1" ]; then
+        echo -e "  Optional desktop icon: enter a local image path or an HTTP(S) URL."
+        echo -en "  ${CYN}?${RST} Icon path/URL (Enter to skip): "
+        read -r ICON_SOURCE || ICON_SOURCE=""
+        ICON_SOURCE="${ICON_SOURCE:-}"
+    fi
+    prepare_desktop_icon
+    local desktop_icon_entry=""
+    [ -n "$DESKTOP_ICON" ] && desktop_icon_entry="Icon=$DESKTOP_ICON"
 
     local q_auto="$(printf '%q' "$AUTOMIZATION_DIR")"
     local q_style="$(printf '%q' "$GAME_STYLE")"
@@ -2212,6 +2322,7 @@ Name=Beatmania IIDX $GAME_STYLE
 Exec=$exec_base
 Type=Application
 Categories=Game;
+$desktop_icon_entry
 EOF
         success "iidx${GAME_STYLE}.desktop created (no monitor mgmt)"
 
@@ -2221,6 +2332,7 @@ Name=Beatmania IIDX $GAME_STYLE (Config)
 Exec=$exec_base --cfg
 Type=Application
 Categories=Game;
+$desktop_icon_entry
 EOF
         success "iidx${GAME_STYLE}-cfg.desktop created"
 
@@ -2385,6 +2497,7 @@ Name=Beatmania IIDX $GAME_STYLE
 Exec=$exec_game
 Type=Application
 Categories=Game;
+$desktop_icon_entry
 EOF
     success "iidx${GAME_STYLE}.desktop created"
 
@@ -2398,6 +2511,7 @@ Name=Beatmania IIDX $GAME_STYLE (Config)
 Exec=$exec_cfg
 Type=Application
 Categories=Game;
+$desktop_icon_entry
 EOF
     success "iidx${GAME_STYLE}-cfg.desktop created"
 
