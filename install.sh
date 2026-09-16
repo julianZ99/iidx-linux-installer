@@ -138,12 +138,6 @@ expand_path() {
     echo "$path"
 }
 
-sanitize_str() {
-    local s="$1"
-    # Strip any char that is not alphanumeric, dash, underscore, colon, slash, dot
-    echo "${s//[^a-zA-Z0-9_\-\.:\/]/}"
-}
-
 preflight_check() {
     detect_distro
     [ "$DISTRO_ID" = "void" ] && validate_void_platform
