@@ -70,7 +70,7 @@ When enabled, the `.desktop` entry uses a helper script (`iidx-mon-state.sh`) th
 
 When disabled, the game launches directly without any display changes.
 
-> **Refresh rate**: Some dumps/cabinets run at 60 Hz, others at 120 Hz. You can set your monitor's refresh rate with `--rate` or via the installer's monitor page. When monitor management is enabled, the desktop entry switches to that rate automatically on every launch. If a dump expects a different rate, the game DLL can also be patched to change it.
+> **Refresh rate**: LDJ mode (`012`) normally targets 60 Hz, while TDJ/Lightning mode (`010`) normally targets 120 Hz. The game code and filenames may still use `LDJ` for either variant. You can set the display refresh rate with `--rate` or via the installer's monitor page. When monitor management is enabled, the desktop entry switches to that rate automatically on every launch. Use a different target only when the game DLL has deliberately been patched for another frame rate.
 
 If a secondary monitor is configured, it is also disabled during gameplay and re-enabled after:
 - **X11**: `xrandr --output <sec> --off`
