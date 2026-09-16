@@ -23,6 +23,20 @@ MAG='\033[0;35m'
 BLD='\033[1m'
 RST='\033[0m'
 
+## The installer manages privileged operations with sudo itself. Running the
+## whole wizard as root changes HOME/USER and can make it use root's Steam and
+## desktop directories instead of the invoking user's installation.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]] && [ "${EUID:-$(id -u)}" -eq 0 ]; then
+    echo -e "${RED}[ERROR]${RST} Do not run this installer as root or with sudo." >&2
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        echo "Run it again as '$SUDO_USER' without sudo: ./install.sh" >&2
+    else
+        echo "Run it again from your regular desktop user: ./install.sh" >&2
+    fi
+    echo "The script will request sudo only for the individual system operations that need it." >&2
+    exit 1
+fi
+
 ## Distro / package manager - populated by detect_distro()
 DISTRO_ID=""
 DISTRO_NAME=""

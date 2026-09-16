@@ -21,6 +21,10 @@ Automated (unofficial) installer for Beatmania IIDX on Linux with **spicetools**
 ./install.sh --style 32 --dump <PATH> --monitor DP-1  # pre-filled
 ```
 
+Run the installer as your regular desktop user, never with `sudo`. It requests
+`sudo` itself for individual system operations. Running the whole script as
+root is rejected because it would use root's home, Steam and application paths.
+
 Interactive setup wizard - no arguments required. All values can be entered through the menu pages. CLI flags are optional and pre-fill values to skip prompts.
 
 ### Options
