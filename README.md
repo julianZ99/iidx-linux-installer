@@ -97,13 +97,20 @@ The installer verifies the tools and development interfaces required to compile
 |-------------|------|------|
 | CMake | `cmake` | `cmake` |
 | pkg-config command | `pkgconf` | `pkg-config` |
-| Wine build tools | `wine` or `wine-staging` | `wine-tools` |
+| Wine build tools and headers | `wine` or `wine-staging` | `wine-tools` + `wine-devel` |
 | PipeWire headers/pkg-config | `libpipewire` | `pipewire-devel` |
-| FFmpeg headers/pkg-config | `ffmpeg` | `ffmpeg-devel` |
+| FFmpeg headers/pkg-config | `ffmpeg` | `ffmpeg6-devel` |
 
-Before building, the installer checks `winegcc`, `winebuild` and the
+Before building, the installer checks `winegcc`, `winebuild`, the Wine
+development header `windef.h`, and the
 `libpipewire-0.3`, `libspa-0.2`, `libavformat`, `libavcodec`, `libavutil` and
-`libswresample` pkg-config modules.
+`libswresample` pkg-config modules. `bmsound_wine v0.2.4` requires the modern
+FFmpeg channel-layout API (`libavutil` 57 or newer), so Void's legacy
+`ffmpeg-devel` package is not sufficient.
+
+Only the `bmsound-pw` and `bmsound-wine` production artifacts are built.
+Upstream test programs are skipped, so test-only headers such as `libsndfile`
+are not required.
 
 ## Vulkan prerequisites
 

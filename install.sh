@@ -348,7 +348,8 @@ init_pkg_maps() {
                 [alsa-pipewire]="alsa-pipewire"
                 [gstreamer1-pipewire]="gstreamer1-pipewire"
                 [pipewire-devel]="pipewire-devel"
-                [ffmpeg-devel]="ffmpeg-devel"
+                [ffmpeg6-devel]="ffmpeg6-devel"
+                [wine-devel]="wine-devel"
             )
             WINE_DEPS=(
                 [gnutls-32bit]="gnutls-32bit"
@@ -1456,7 +1457,7 @@ verify_build_pkgconfig_modules() {
             ;;
         xbps)
             local pipewire_pkg="pipewire-devel"
-            local ffmpeg_pkg="ffmpeg-devel"
+            local ffmpeg_pkg="ffmpeg6-devel"
             ;;
         *) return 0 ;;
     esac
@@ -1475,13 +1476,29 @@ verify_build_pkgconfig_modules() {
         build_missing=1
     fi
 
-    if pkg-config --exists libavformat libavcodec libavutil libswresample; then
+    if pkg-config --exists libavformat libavcodec libavutil libswresample && \
+       pkg-config --atleast-version=57 libavutil; then
         success "FFmpeg development interfaces"
     else
-        warn "Missing FFmpeg development interfaces: libavformat, libavcodec, libavutil, libswresample"
+        warn "Missing or outdated FFmpeg development interfaces (libavutil 57+ required)."
+        warn "Required modules: libavformat, libavcodec, libavutil, libswresample"
         warn "Required package: $ffmpeg_pkg"
         build_missing=1
     fi
+
+    local wine_header_pkg="wine"
+    local wine_header_test
+    [ "$PKG_MGR" = "xbps" ] && wine_header_pkg="wine-devel"
+    wine_header_test="$(mktemp /tmp/iidx-wine-header-XXXXXX.c)"
+    printf '#include <windef.h>\n' > "$wine_header_test"
+    if winegcc -E "$wine_header_test" >/dev/null 2>&1; then
+        success "Wine development headers"
+    else
+        warn "Wine development header windef.h is unavailable to winegcc."
+        warn "Required package: $wine_header_pkg"
+        build_missing=1
+    fi
+    rm -f "$wine_header_test"
 
     [ "$build_missing" = "0" ] || die "bmsound_wine build dependencies are incomplete."
 }
@@ -1836,7 +1853,13 @@ page_binaries() {
         git checkout "tags/${BMSOUND_VER}"
         git submodule update --init --recursive
         log "Building bmsound_wine..."
-        make -Rs build TARGET_ARCH=x64 TARGET_TYPE=Release
+        # Upstream defaults to x86_64-pc-linux-gnu-pkg-config, which is not
+        # provided by Void. Use the validated native pkg-config command so the
+        # PipeWire/SPA and FFmpeg include paths are passed to the compiler.
+        # Build only the production artifacts: the generic "build" target also
+        # compiles test programs that require unrelated development headers.
+        make -Rs bmsound-pw@post bmsound-wine@post \
+            TARGET_ARCH=x64 TARGET_TYPE=Release PKG_CONFIG=pkg-config
     )
 
     local bmsw_src=""
